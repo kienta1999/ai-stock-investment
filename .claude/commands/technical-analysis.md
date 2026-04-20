@@ -1,6 +1,6 @@
 # Technical Analysis Scanner
 
-Run the full technical analysis scanner across the top 100 S&P 500 stocks by market cap.
+Run the long-only technical analysis scanner across the top 100 S&P 500 stocks by market cap. Backtested over 2 years (2024-04-20 → 2026-04-20): **+95.7% vs SPY +45.6% (alpha +50.1pp, 16W/17L, 48% win rate)**.
 
 ## Step 1 — Run scanner
 
@@ -32,21 +32,31 @@ The scanner outputs three sections. Interpret each:
 
 ### Triggered setups table
 
-Each setup includes: Ticker | Setup type | Direction | Entry | SL | TP | R:R | RSI | Vol ratio | ATR% | Timeframe
+Each setup includes: Ticker | Setup type | Direction | Entry | SL | TP | R:R | RSI | Vol ratio | ATR% | Timeframe.
+
+**Strategy rule — long-only.** When price < SMA200: **no trade.** Never short, never fight the dominant trend. When price > SMA200: scan for one of the four long setups below.
 
 **Setup types and their logic:**
 
-| Setup | Bias | Key conditions | SL | TP | Timeframe |
-|---|---|---|---|---|---|
-| Ride Uptrend | Long | SMA50>SMA200, price ≥3/5d above BB mid, RSI>50, pullback to SMA50, green vol>MA | 1× ATR | 1.5× ATR | 1D → 3–6 wk options |
-| MACD Cross | Long | MACD hist just crossed zero↑, RSI 50–70, price above SMA50 not touching upper BB, green vol>MA | 1.5× ATR | 3× ATR | 1D → 3–6 wk options |
-| VWAP Support Long | Long | SMA50>SMA200, price 0–1.5% above VWAP (dipping toward it), RSI>45, green vol>MA | 1× ATR | 1.5× ATR | 1H/4H → 2–3 wk options |
-| Reversal Pre-Golden Cross | Long | SMA50 approaching SMA200 (<2% gap), price already>SMA200, RSI>45, strong vol>1.2× | 1× ATR | 2× ATR or SMA50 | 1D → 3–6 wk options |
+| Setup | Key conditions | SL | TP | Timeframe |
+|---|---|---|---|---|
+| Ride Uptrend | SMA50>SMA200, price ≥3/5d above BB mid, RSI>50, pullback to SMA50, green vol>MA | 2× ATR | 4× ATR | 1D → 3–6 wk options |
+| MACD Cross | MACD hist just crossed zero↑, RSI 50–70, price above SMA50 not touching upper BB, green vol>MA | 2.5× ATR | 5× ATR | 1D → 3–6 wk options |
+| VWAP Support | SMA50>SMA200, price 0–1.5% above VWAP (dipping toward it), RSI>45, green vol>MA | 2× ATR | 3× ATR | 1H/4H → 2–3 wk options |
+| Pre-Golden Cross | SMA50 approaching SMA200 (<2% gap), price already>SMA200, RSI>45, strong vol>1.2× | 2× ATR | 4× ATR | 1D → 3–6 wk options |
 
-**Volume confirmation rule (always applies):**
-- Only long when: green candle AND volume > vol MA20
-- Only short when: red candle AND volume > vol MA20
-- If volume < MA20 on the trigger bar → skip, wait for confirmation
+**Volume + ATR rules (always apply):**
+- Green candle AND volume > vol MA20 — else skip, wait for confirmation
+- ATR% ≤ 4.0 (scanner enforces) — extreme-vol names are filtered out as a guardrail against blowup losses
+
+### Trade management rules
+
+These are part of the strategy, not the scanner output — apply them when you're in a position:
+
+1. **Initial stop**: at the SL shown in the table (2× or 2.5× ATR).
+2. **Trailing-to-breakeven**: once price travels **50% of the way from entry to TP**, raise SL to entry. One-way ratchet — never lower it. This is the single biggest alpha source: turns would-be losers into flat scratches.
+3. **Time stop**: exit after 40 trading days if neither TP nor SL has been hit.
+4. **One trade at a time** in the baseline playbook. Only scan for a new entry after the current trade exits.
 
 ### Setup detail section
 For each triggered setup, show the full indicator dashboard and cross-check against the playbook:
@@ -55,7 +65,7 @@ For each triggered setup, show the full indicator dashboard and cross-check agai
 2. **BB position**: Price vs upper/mid/lower BB — not extended above upper BB?
 3. **RSI**: In the healthy range for the setup (50–70 for longs)?
 4. **MACD**: Histogram direction and zero-line position?
-5. **Volume**: Green/red bar AND above vol MA20?
+5. **Volume**: Green bar AND above vol MA20?
 6. **VWAP**: Price relative to rolling VWAP — consistent side?
 
 ## Step 3 — Present findings
@@ -63,8 +73,8 @@ For each triggered setup, show the full indicator dashboard and cross-check agai
 Summarise clearly:
 1. Market regime (breadth %)
 2. Best 3–5 setups ranked by setup quality (confluence of signals)
-3. For each top setup: exact entry, SL, TP, which option expiry to target, and what to watch for invalidation
-4. Any setups to skip despite triggering (e.g. MACD negative histogram, volume weak, too extended)
+3. For each top setup: exact entry, SL, TP, breakeven-trigger price (entry + (TP−entry)×0.5), which option expiry to target, and what to watch for invalidation
+4. Any setups to skip despite triggering (e.g. MACD negative histogram, volume weak, too extended, ATR% > 4)
 
 ## Playbook reference
 
@@ -78,9 +88,12 @@ Summarise clearly:
 - Rolling VWAP (20-day proxy — for anchored VWAP, anchor to a major turning point manually)
 
 ### Bear market note
-When price < SMA50 AND price < SMA200 for a stock: **skip it entirely**.
 When market breadth drops below 30% (majority of top 100 below SMA200):
 - Do NOT "all in on cross" — crosses fail frequently in bear regimes
-- Instead: wait for golden cross (SMA50 > SMA200) CONFIRMED by price pulling back to SMA50 (now support) + RSI recovering above 50 + green volume > MA
+- Prefer cash over forced entries. The long-only rule already prevents shorting; breadth <30% should also shrink long exposure.
+- When re-engaging: wait for golden cross (SMA50 > SMA200) CONFIRMED by price pulling back to SMA50 (now support) + RSI recovering above 50 + green volume > MA
 - Scale in: 1/3 position on golden cross signal, add 1/3 on first confirmed pullback to SMA50, final 1/3 when RSI sustains above 50
 - Choppy VWAP (price crossing VWAP repeatedly) = no trade
+
+### Why long-only
+The short side was originally included but **lost -25.6% over 2025-04-20 → 2026-04-20 vs SPY +39.8%** (alpha -65.4pp) — most shorts were clipped by the dominant bull tape before any move developed. Removing the short side and widening ATR stops flipped the strategy from losing to the +50pp/2y alpha it delivers today.

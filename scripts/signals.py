@@ -2,24 +2,22 @@
 """
 Score each stock against the trading playbook strategies.
 
-Rule: price > SMA200 → LONG setups only. price < SMA200 → SHORT setups only.
-Never bet against the dominant SMA200 direction.
+Rule: only LONG when price > SMA200. Price < SMA200 → no trade (do not short,
+do not fight the tape).
 """
 
 
 def score(ind: dict) -> list[dict]:
     """
-    Evaluate all strategy setups for a single ticker's indicator dict.
+    Evaluate all long setups for a single ticker's indicator dict.
     Returns a list of triggered setup dicts (may be empty).
     """
     setups = []
     p = ind["price"]
     atr = ind["atr"]
-    above = ind["price_above_sma200"]
 
-    if above:
+    if ind["price_above_sma200"]:
         setups += _long_setups(ind, p, atr)
-    # Short side disabled — long-only strategy.
     return setups
 
 
@@ -95,84 +93,6 @@ def _long_setups(ind: dict, p: float, atr: float) -> list[dict]:
         sl = round(p - 2.0 * atr, 2)
         tp = round(p + 4.0 * atr, 2)
         setups.append(_setup("Pre-Golden Cross", "LONG", entry, sl, tp, "1:2",
-                             "1D → 3-6 wk options",
-                             f"SMA50/200 gap <2%, vol {ind['vol_ratio']:.1f}x"))
-
-    return setups
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SHORT SETUPS  (price < SMA200)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _short_setups(ind: dict, p: float, atr: float) -> list[dict]:
-    setups = []
-
-    # ── S1: Ride the Downtrend ───────────────────────────────────────────────
-    # Consistent below BB mid → bounce to SMA50 (resistance) → red vol spike
-    if (
-        not ind["golden_cross"]           # SMA50 < SMA200 (death cross)
-        and ind["below_mid_5d"] >= 3      # price mostly below BB mid
-        and ind["rsi"] < 50
-        and ind["near_sma50_recently"]    # bounce up to SMA50 (resistance)
-        and not ind["is_green"]           # red candle
-        and ind["vol_ratio"] > 1.0
-    ):
-        entry = p
-        sl = round(p + 1.0 * atr, 2)
-        tp = round(p - 1.5 * atr, 2)
-        setups.append(_setup("Ride Downtrend", "SHORT", entry, sl, tp, "1:1.5",
-                             "1D → 3-6 wk options",
-                             f"RSI {ind['rsi']:.0f}, vol {ind['vol_ratio']:.1f}x MA"))
-
-    # ── S2: MACD Bearish Cross ───────────────────────────────────────────────
-    # Hist just crossed below zero, RSI 30-50, not at lower BB
-    if (
-        ind["macd_crossed_down"]
-        and 30 <= ind["rsi"] <= 50
-        and p < ind["sma50"]
-        and p > ind["bb_lower"] * 1.01    # not touching lower BB
-        and not ind["is_green"]
-        and ind["vol_ratio"] > 1.0
-    ):
-        entry = p
-        sl = round(p + 1.5 * atr, 2)
-        tp = round(p - 3.0 * atr, 2)
-        setups.append(_setup("MACD Cross", "SHORT", entry, sl, tp, "1:2",
-                             "1D → 3-6 wk options",
-                             f"MACD hist {ind['macd_hist']:+.3f}, RSI {ind['rsi']:.0f}"))
-
-    # ── S3: VWAP Resistance Short ────────────────────────────────────────────
-    # Price just below VWAP (bouncing up toward it as resistance)
-    vd = ind["price_vs_vwap_pct"]
-    if (
-        not ind["golden_cross"]
-        and -1.5 < vd < 0
-        and ind["rsi"] < 55
-        and ind["below_mid_5d"] > 0
-        and not ind["is_green"]
-        and ind["vol_ratio"] > 1.0
-    ):
-        entry = p
-        sl = round(p + 1.0 * atr, 2)
-        tp = round(p - 1.5 * atr, 2)
-        setups.append(_setup("VWAP Resistance", "SHORT", entry, sl, tp, "1:1.5",
-                             "1H/4H → 2-3 wk options",
-                             f"Price {vd:+.1f}% vs VWAP, RSI {ind['rsi']:.0f}"))
-
-    # ── S4: Pre-Death Cross Reversal ─────────────────────────────────────────
-    # SMA50 approaching SMA200 from above, price already below SMA200
-    if (
-        ind["golden_cross"]               # SMA50 still above SMA200 ...
-        and ind["cross_recent"]           # ... but gap < 2% (death cross imminent)
-        and ind["rsi"] < 55
-        and not ind["is_green"]
-        and ind["vol_ratio"] > 1.2
-    ):
-        entry = p
-        sl = round(p + 1.0 * atr, 2)
-        tp = round(p - 2.0 * atr, 2)   # target 2 ATR below entry
-        setups.append(_setup("Pre-Death Cross", "SHORT", entry, sl, tp, "1:2",
                              "1D → 3-6 wk options",
                              f"SMA50/200 gap <2%, vol {ind['vol_ratio']:.1f}x"))
 

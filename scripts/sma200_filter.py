@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Technical analysis scanner — both sides of the market.
-  Rule: price > SMA200 → LONG candidates only.
-        price < SMA200 → SHORT candidates only.
-  Scans all top-100 S&P 500 stocks; never bets against the SMA200 direction.
+Technical analysis scanner — long-only strategy.
+  Rule: only consider LONG setups when price > SMA200.
+        Price < SMA200 → no trade (do not short, do not fight the tape).
+  Skips entries where ATR% > MAX_ATR_PCT (extreme-volatility guardrail).
+  Scans all top-100 S&P 500 stocks.
 """
 
 import sys
@@ -20,6 +21,8 @@ except ImportError:
     print("ERROR: Missing dependencies. Run:")
     print("  uv pip install yfinance pandas lxml requests --python .venv/bin/python3")
     sys.exit(1)
+
+MAX_ATR_PCT = 4.0   # skip entries where ATR% exceeds this (vol-cap guardrail)
 
 
 def run(force_refresh: bool = False) -> None:
@@ -77,6 +80,8 @@ def run(force_refresh: bool = False) -> None:
                 "Trend": trend,
             })
 
+        if ind.get("atr_pct", 0) > MAX_ATR_PCT:
+            continue
         for s in score(ind):
             triggered.append({"Ticker": ticker, **ind, **s})
 
