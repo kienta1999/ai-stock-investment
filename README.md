@@ -193,6 +193,14 @@ So the volume-only change is a real win, but only **+2.4pp better than baseline*
 
 Today's tuning only varied L1 and L4 parameters (the most-triggered setups). L2 (MACD Cross) and L3 (VWAP Support) might have over-tight thresholds that block useful triggers — that's the next area to probe with another grid search round.
 
+L2/L3 grid is wired up in `scripts/tune.py` (288 variations, ~4 hours overnight). Run with:
+
+```bash
+.venv/bin/python3 scripts/tune.py 2>&1 | tee /tmp/tune-l2l3.log
+```
+
+Output is saved to `/tmp/tune-l2l3.log` — read that file the next morning if the terminal session is gone. (Note: `/tmp` is wiped on reboot — copy somewhere durable if you don't analyze it the same day.)
+
 ## MCP Servers (optional tooling)
 
 ---
