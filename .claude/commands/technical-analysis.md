@@ -32,7 +32,11 @@ The scanner outputs three sections. Interpret each:
 
 ### Triggered setups table
 
-Each setup includes: Ticker | Setup type | Direction | Entry | SL | TP | R:R | RSI | Vol ratio | ATR% | Timeframe.
+Each setup includes: Ticker | Setup type | **Quality** | Direction | Entry | SL | TP | R:R | RSI | Vol ratio | ATR% | Timeframe. Rows are sorted by Quality descending.
+
+**Two-stage funnel:**
+1. **L1–L4 setups (binary triggers)** — each setup is independent. A stock appears in the table if it triggers ANY one of L1, L2, L3, or L4. Within a single setup, ALL of *that setup's* conditions must pass. One stock can trigger multiple setups → it appears as multiple rows.
+2. **Quality score (0–100)** — rates how clean the underlying conditions are. Surfaced so you can prefer high-quality triggers over weak ones.
 
 **Strategy rule — long-only.** When price < SMA200: **no trade.** Never short, never fight the dominant trend. When price > SMA200: scan for one of the four long setups below.
 
@@ -48,6 +52,30 @@ Each setup includes: Ticker | Setup type | Direction | Entry | SL | TP | R:R | R
 **Volume + ATR rules (always apply):**
 - Green candle AND volume > vol MA20 — else skip, wait for confirmation
 - ATR% ≤ 4.0 (scanner enforces) — extreme-vol names are filtered out as a guardrail against blowup losses
+
+### Quality score (0–100) — how to read it
+
+Defined in `scripts/signals.py` (`quality()` function). Five factors, weighted by how predictive they are:
+
+| Factor | Max pts | Full credit when… | Half credit when… | Why this weight |
+|---|---|---|---|---|
+| **Volume conviction** | 35 | vol_ratio ≥ 2.0× MA | linear scaling: 1.5× = 17 pts | Real-money buyers showing up = strongest single signal |
+| **RSI sweet spot** | 30 | RSI 55–65 | RSI 50–70 | "Trending but not overbought" zone |
+| **ATR Goldilocks** | 20 | ATR% 1.5–3.5 | ATR% 1.0–5.0 | Enough movement to reach TP, not crazy-volatile |
+| **Trend alignment** | 10 | LONG + SMA50>SMA200 | — | Tiebreaker bonus for trading with dominant trend |
+| **MACD alignment** | 5 | LONG + macd_hist > 0 | — | Smallest weight — confirmatory only |
+
+**Score interpretation:**
+- **80–100**: Premium setup — full conviction. The backtest's most profitable trades cluster here.
+- **60–79**: Good setup — workable, but watch one of the factors is weak (usually volume or RSI extension).
+- **40–59**: Marginal — typically barely past one or two thresholds. Skip unless multiple setups confirm the same ticker.
+- **<40**: Weak — backtest treats below-25 as "no trade." Skip.
+
+**The backtest picks `max(quality)` automatically.** You should not — bring your own judgment using BOTH the trigger type AND the score:
+- Prefer a 90-quality Pre-Golden Cross over a 50-quality Ride Uptrend, even though L1 is the "premier" setup
+- Two setups firing on the same ticker (e.g. Ride Uptrend + MACD Cross) is a strong confluence signal even if individual scores are mid-tier
+- A high-quality score + setup type that historically suits current market regime > raw highest score
+- If quality is high but you spot context the scorer can't (earnings tomorrow, sector rotation, macro headline) — override and skip
 
 ### Trade management rules
 
@@ -72,9 +100,14 @@ For each triggered setup, show the full indicator dashboard and cross-check agai
 
 Summarise clearly:
 1. Market regime (breadth %)
-2. Best 3–5 setups ranked by setup quality (confluence of signals)
+2. Best 3–5 setups ranked using **both** the Quality score AND the trigger type — explain *why* you ranked them this way (e.g. "BA scores 90 with 2.4× volume vs AAPL 66 with barely 1.0× — BA wins on volume conviction even though L1 is normally a stronger setup type")
 3. For each top setup: exact entry, SL, TP, breakeven-trigger price (entry + (TP−entry)×0.5), which option expiry to target, and what to watch for invalidation
-4. Any setups to skip despite triggering (e.g. MACD negative histogram, volume weak, too extended, ATR% > 4)
+4. Any setups to skip despite triggering — call out the specific failing factor:
+   - Quality < 40 → "weak score, skip"
+   - Volume just barely above 1.0× → "no real conviction"
+   - RSI > 70 → "extended, mean reversion risk"
+   - VWAP distance > 3% → "not a real pullback, just a continuation entry"
+   - MACD hist negative → "momentum already fading"
 
 ## Playbook reference
 

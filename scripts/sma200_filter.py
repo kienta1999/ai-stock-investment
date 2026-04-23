@@ -16,7 +16,7 @@ try:
     import yfinance as yf
     from universe import load_universe
     from indicators import compute
-    from signals import score, market_regime
+    from signals import score, market_regime, quality
 except ImportError:
     print("ERROR: Missing dependencies. Run:")
     print("  uv pip install yfinance pandas lxml requests --python .venv/bin/python3")
@@ -83,7 +83,9 @@ def run(force_refresh: bool = False) -> None:
         if ind.get("atr_pct", 0) > MAX_ATR_PCT:
             continue
         for s in score(ind):
-            triggered.append({"Ticker": ticker, **ind, **s})
+            row = {"Ticker": ticker, **ind, **s}
+            row["quality"] = quality(row)
+            triggered.append(row)
 
     long_count  = len(long_rows)
     short_count = len(short_rows)
@@ -112,11 +114,11 @@ def run(force_refresh: bool = False) -> None:
         print("\nNo setups triggered today.")
         return
 
-    setup_df = pd.DataFrame(triggered)
+    setup_df = pd.DataFrame(triggered).sort_values("quality", ascending=False)
     longs  = setup_df[setup_df["direction"] == "LONG"]
     shorts = setup_df[setup_df["direction"] == "SHORT"]
 
-    display_cols = ["Ticker", "setup", "entry", "sl", "tp", "rr",
+    display_cols = ["Ticker", "setup", "quality", "entry", "sl", "tp", "rr",
                     "rsi", "vol_ratio", "atr_pct", "timeframe", "notes"]
 
     for label, subset in [("LONG", longs), ("SHORT", shorts)]:
@@ -124,15 +126,15 @@ def run(force_refresh: bool = False) -> None:
             continue
         cols = [c for c in display_cols if c in subset.columns]
         print(f"\n{'='*66}")
-        print(f"  {label} SETUPS  ({len(subset)} found)")
+        print(f"  {label} SETUPS  ({len(subset)} found — sorted by quality desc)")
         print(f"{'='*66}")
         print(subset[cols].to_string(index=False))
 
-    # ── Per-setup detail ──────────────────────────────────────────────────────
+    # ── Per-setup detail (highest quality first) ─────────────────────────────
     print(f"\n── Setup Detail ──")
-    for _, row in setup_df.sort_values("direction").iterrows():
+    for _, row in setup_df.iterrows():
         arrow = "▲" if row["direction"] == "LONG" else "▼"
-        print(f"\n  {arrow} {row['Ticker']} | {row['setup']} | {row['direction']}")
+        print(f"\n  {arrow} {row['Ticker']} | {row['setup']} | {row['direction']} | Quality: {row['quality']}/100")
         print(f"    Entry: {row['entry']}  SL: {row['sl']}  TP: {row['tp']}  R:R {row['rr']}")
         print(f"    RSI: {row['rsi']:.0f}  |  Vol: {row['vol_ratio']:.1f}x MA  |  ATR: {row['atr_pct']:.1f}%")
         print(f"    MACD hist: {row['macd_hist']:+.3f}  |  BB pos: {row['above_mid_5d']}/5d above mid")

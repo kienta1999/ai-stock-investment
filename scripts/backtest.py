@@ -18,55 +18,14 @@ import pandas as pd
 import yfinance as yf
 from universe import load_universe
 from indicators import compute
-from signals import score as score_setups
+from signals import score as score_setups, quality, MIN_QUALITY_SCORE
 
 START_DATE  = date(2024, 4, 20)
 END_DATE    = date(2026, 4, 20)
 CAPITAL_INIT = 10_000.0
 TIME_STOP_DAYS = 40          # max days to hold if TP/SL not hit
-MIN_QUALITY_SCORE = 25       # skip if best setup scores below this
 MAX_ATR_PCT = 4.0            # skip entries where ATR% > this (vol-cap)
 BENCHMARK   = "SPY"          # S&P 500 ETF for buy-and-hold comparison
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Setup quality scorer — higher = cleaner
-# ─────────────────────────────────────────────────────────────────────────────
-
-def quality(row: dict) -> float:
-    q = 0.0
-    rsi       = row.get("rsi", 50)
-    vol_ratio = row.get("vol_ratio", 1.0)
-    atr_pct   = row.get("atr_pct", 2.5)
-    direction = row.get("direction", "LONG")
-    setup     = row.get("setup", "")
-    uptrend   = row.get("sma50_above_sma200", False)
-    macd_hist = row.get("macd_hist", 0)
-
-    # Volume conviction (up to 35 pts)
-    q += min((vol_ratio - 1.0) * 35, 35)
-
-    # RSI sweet spot (up to 30 pts)
-    if direction == "LONG":
-        if 55 <= rsi <= 65:  q += 30
-        elif 50 <= rsi <= 70: q += 15
-    else:
-        if 35 <= rsi <= 45:  q += 30
-        elif 30 <= rsi <= 50: q += 15
-
-    # ATR — prefer 1.5–3.5% (liquid, not too wild) (up to 20 pts)
-    if 1.5 <= atr_pct <= 3.5:  q += 20
-    elif 1.0 <= atr_pct <= 5.0: q += 10
-
-    # Trend alignment bonus
-    if direction == "LONG"  and uptrend: q += 10
-    if direction == "SHORT" and not uptrend: q += 10
-
-    # MACD histogram aligned with direction
-    if direction == "LONG"  and macd_hist > 0: q += 5
-    if direction == "SHORT" and macd_hist < 0: q += 5
-
-    return round(q, 1)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
