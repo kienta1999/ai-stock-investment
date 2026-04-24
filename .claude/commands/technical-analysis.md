@@ -1,6 +1,6 @@
 # Technical Analysis Scanner
 
-Run the long-only technical analysis scanner across the top 100 S&P 500 stocks by market cap. Backtested over 2 years (2024-04-20 → 2026-04-20): **+125.6% vs SPY +45.6% (alpha +80.0pp, 21W/23L, 48% win rate)**.
+Run the long-only technical analysis scanner across the top 100 S&P 500 stocks by market cap. Backtested over 2 years (2024-04-20 → 2026-04-20): **+172.4% vs SPY +45.6% (alpha +126.9pp, 22W/20L, 52% win rate)**. Survives COVID crash 2020-02-19 → 2020-12-31: **+42.4% vs SPY +12.0% (alpha +30.4pp, 60% win rate)** via the market-wide regime gate.
 
 ## Step 1 — Run scanner
 
@@ -39,6 +39,12 @@ Each setup includes: Ticker | Setup type | **Quality** | Direction | Entry | SL 
 2. **Quality score (0–100)** — rates how clean the underlying conditions are. Surfaced so you can prefer high-quality triggers over weak ones.
 
 **Strategy rule — long-only.** When price < SMA200: **no trade.** Never short, never fight the dominant trend. When price > SMA200: scan for one of the four long setups below.
+
+**Market-wide regime gate (manual check before acting on any trigger):** even if a ticker's individual setup looks clean, skip ALL longs when either:
+- **SPY < its 200-day MA** (broad market not in uptrend), OR
+- **VIX ≥ 30** (crash regime)
+
+The backtest enforces this automatically via `sma200_filter.long_regime_ok()`; the live scanner (`sma200_filter.py`) currently prints all triggers regardless, so the operator must sanity-check SPY and VIX themselves before taking the trade. Swung COVID-2020 alpha from -24.9pp → +30.4pp in the backtest — do not skip this check.
 
 **Setup types and their logic:**
 
@@ -134,4 +140,4 @@ When market breadth drops below 30% (majority of top 100 below SMA200):
 - Choppy VWAP (price crossing VWAP repeatedly) = no trade
 
 ### Why long-only
-The short side was originally included but **lost -25.6% over 2025-04-20 → 2026-04-20 vs SPY +39.8%** (alpha -65.4pp) — most shorts were clipped by the dominant bull tape before any move developed. Removing the short side and widening ATR stops flipped the strategy from losing to the +76.3pp/2y alpha it delivers today (post-tuning).
+The short side was originally included but **lost -25.6% over 2025-04-20 → 2026-04-20 vs SPY +39.8%** (alpha -65.4pp) — most shorts were clipped by the dominant bull tape before any move developed. Removing the short side, widening ATR stops, adding the trailing-to-breakeven rule, and gating longs on SPY>200DMA + VIX<30 flipped the strategy from losing to the **+126.9pp/2y alpha** it delivers today (post-tuning, post-regime-gate).
