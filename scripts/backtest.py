@@ -17,15 +17,15 @@ from datetime import date, timedelta
 import pandas as pd
 import yfinance as yf
 from universe import load_universe
-from indicators import compute
-from signals import score as score_setups, quality, MIN_QUALITY_SCORE
-from sma200_filter import long_regime_ok, SPY_MA_PERIOD, VIX_MAX, MAX_ATR_PCT
+from indicators import compute, ticker_frame
+from signals import (score as score_setups, quality, MIN_QUALITY_SCORE,
+                     long_regime_ok, build_regime_series,
+                     MAX_ATR_PCT, SPY_MA_PERIOD, VIX_MAX, BENCHMARK)
 
 START_DATE  = date(2024, 4, 20)
 END_DATE    = date(2026, 4, 20)
 CAPITAL_INIT = 10_000.0
 TIME_STOP_DAYS = 40          # max days to hold if TP/SL not hit
-BENCHMARK   = "SPY"          # S&P 500 ETF for buy-and-hold comparison
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,18 +128,6 @@ def simulate_trade(ticker: str, direction: str,
 # Core simulation engine — single SOT for backtest.py and tune.py
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_regime_series(raw: pd.DataFrame, benchmark: str = BENCHMARK):
-    """Precompute regime series from raw OHLCV. Returns (spy_close, spy_ma, vix_close)
-    or (None, None, None) if either benchmark or ^VIX is missing."""
-    try:
-        spy_close = raw["Close"][benchmark].ffill()
-        spy_ma    = spy_close.rolling(SPY_MA_PERIOD).mean()
-        vix_close = raw["Close"]["^VIX"].ffill()
-        return spy_close, spy_ma, vix_close
-    except (KeyError, Exception):
-        return None, None, None
-
-
 def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, *,
              capital_init: float = CAPITAL_INIT,
              spy_close=None, spy_ma=None, vix_close=None,
@@ -180,17 +168,8 @@ def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, 
                             if regime_ready else True)
 
             for ticker in tickers:
-                try:
-                    df = pd.DataFrame({
-                        "Open":   raw["Open"][ticker],
-                        "High":   raw["High"][ticker],
-                        "Low":    raw["Low"][ticker],
-                        "Close":  raw["Close"][ticker],
-                        "Volume": raw["Volume"][ticker],
-                    }).loc[:today_ts].dropna()
-                except (KeyError, TypeError):
-                    continue
-                if len(df) < 200:
+                df = ticker_frame(raw, ticker, up_to=today_ts)
+                if df is None or len(df) < 200:
                     continue
 
                 ind = compute(df)

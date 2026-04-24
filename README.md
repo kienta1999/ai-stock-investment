@@ -32,7 +32,7 @@ Also survives regime change — 2020 COVID crash window (2020-02-19 → 2020-12-
 - **SPY close < SPY 200-day MA** (broad market not in uptrend), OR
 - **VIX ≥ 30** (crash regime — don't catch falling knives)
 
-Lives in `scripts/sma200_filter.py` as `long_regime_ok()` — single SOT, applied by the shared `simulate()` engine used by both the backtest and tuner. Swung COVID-2020 alpha from **-24.9pp → +30.4pp** (see "Regime gate" section below). Do not "all in on the cross" in a bear regime — breadth <30% = prefer cash over forced longs.
+Lives in `scripts/signals.py` as `long_regime_ok()` — single SOT, applied by the shared `simulate()` engine used by both the backtest and tuner. Swung COVID-2020 alpha from **-24.9pp → +30.4pp** (see "Regime gate" section below). Do not "all in on the cross" in a bear regime — breadth <30% = prefer cash over forced longs.
 
 ### 3. The four long setups
 
@@ -119,7 +119,19 @@ TIME_STOP_DAYS    = 40
 BENCHMARK         = "SPY"
 ```
 
-Algo-level filters (`MAX_ATR_PCT`, `SPY_MA_PERIOD`, `VIX_MAX`) and regime helpers (`long_regime_ok`, `market_regime`) are single-SOT in `scripts/sma200_filter.py`. Strategy tunables (setup thresholds, SL/TP ATR multipliers, quality-score weights, `MIN_QUALITY_SCORE`) live in `scripts/signals.py` so they're shared by the backtest and the live scanner. Edit there and re-run the backtest to A/B a change.
+All algo-level knobs — setup thresholds, SL/TP ATR multipliers, quality-score weights, `MIN_QUALITY_SCORE`, AND the pre-setup global filters — live in `scripts/signals.py` as the single SOT, imported by both the backtest engine and the live scanner. Top of the file:
+
+```python
+# Algo-level filters (applied before any setup is evaluated)
+MAX_ATR_PCT    = 4.0    # skip entries where ATR% > this (vol-cap guardrail)
+SPY_MA_PERIOD  = 200    # SPY trend filter for long-entry regime gate
+VIX_MAX        = 30.0   # block LONG entries when VIX >= this
+
+# Plus L1/L2/L3/L4 setup thresholds, quality-score weights,
+# MIN_QUALITY_SCORE, market_regime(), long_regime_ok() ...
+```
+
+Edit there and re-run the backtest to A/B a change.
 
 The core simulation loop (`simulate()`) lives in `scripts/backtest.py` and is imported by `scripts/tune.py` — parameter sweeps inherit every rule change automatically, zero drift between backtest and tuner.
 
@@ -138,9 +150,10 @@ uv pip install yfinance pandas lxml requests --python .venv/bin/python3 -q
 scripts/
   universe.py       # Fetches + caches top 100 S&P 500 by market cap
   indicators.py     # Computes SMA/BB/RSI/ATR/MACD/VWAP per ticker
-  signals.py        # Four long setups L1-L4 + quality() scorer + setup tunables
-  sma200_filter.py  # Live scanner + SOT for algo-level filters (long_regime_ok,
-                    #   market_regime, MAX_ATR_PCT, SPY_MA_PERIOD, VIX_MAX)
+  signals.py        # SOT for all trade rules: L1-L4 setups, quality() scorer,
+                    #   long_regime_ok(), market_regime(), MAX_ATR_PCT,
+                    #   SPY_MA_PERIOD, VIX_MAX, MIN_QUALITY_SCORE, Q_* weights
+  sma200_filter.py  # Live scanner CLI — prints breadth + triggered setups
   backtest.py       # simulate() engine (1 trade at a time, trailing-BE stop,
                     #   SPY regime gate) + CLI entry point + benchmark summary
   tune.py           # Parameter grid search — imports simulate() from backtest
@@ -348,7 +361,7 @@ The algo *did* partially adapt (no entries Mar 9 → Apr 29, skipping the worst 
 
 ### The fix — a market-wide regime gate
 
-Added `long_regime_ok()` in `scripts/sma200_filter.py` (single SOT, consumed by the shared `simulate()` engine). LONG entries now require BOTH:
+Added `long_regime_ok()` in `scripts/signals.py` (single SOT, consumed by the shared `simulate()` engine). LONG entries now require BOTH:
 - **SPY close > SPY 200-day MA** (broad trend intact)
 - **VIX < 30** (no crash regime)
 

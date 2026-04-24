@@ -37,7 +37,8 @@ import yfinance as yf
 
 from universe import load_universe
 import signals as sg
-from backtest import simulate, build_regime_series, CAPITAL_INIT, BENCHMARK
+from signals import build_regime_series, BENCHMARK
+from backtest import simulate, CAPITAL_INIT
 
 IN_START   = date(2024, 4, 20)
 IN_END     = date(2025, 4, 20)

@@ -9,6 +9,21 @@ All thresholds and multipliers below are tunable parameters — change here,
 then re-run scripts/backtest.py to see the impact on the 2-year return.
 """
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    import pandas as pd
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Algo-level filters — applied BEFORE per-setup evaluation. Consumed by the
+# live scanner (sma200_filter.py) and the backtest engine (backtest.simulate).
+# ─────────────────────────────────────────────────────────────────────────────
+
+MAX_ATR_PCT    = 4.0    # skip entries where ATR% exceeds this (vol-cap guardrail)
+SPY_MA_PERIOD  = 200    # SPY trend filter for long-entry regime gate
+VIX_MAX        = 30.0   # block LONG entries when VIX >= this
+BENCHMARK      = "SPY"  # market benchmark (regime gate + buy-and-hold comparison)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tunable parameters
 # ─────────────────────────────────────────────────────────────────────────────
@@ -224,3 +239,47 @@ def quality(row: dict) -> float:
         q += Q_MACD_ALIGN_PTS
 
     return round(q, 1)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regime helpers — algo-level gates that sit above per-setup triggers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def market_regime(long_count: int, total: int) -> str:
+    """Breadth-based regime label from count of tickers above their SMA200."""
+    rate = long_count / total
+    short_count = total - long_count
+    base = f"{long_count}L / {short_count}S of {total}"
+    if rate >= 0.70:
+        return f"STRONG BULL ({base}) — broad uptrend, favour longs"
+    elif rate >= 0.50:
+        return f"MIXED ({base}) — selective longs, tighter stops"
+    elif rate >= 0.30:
+        return f"WEAKENING ({base}) — more shorts than longs, reduce long size"
+    else:
+        return f"BEAR ({base}) — majority below SMA200, favour shorts"
+
+
+def long_regime_ok(spy_close: "pd.Series", spy_ma: "pd.Series",
+                   vix_close: "pd.Series", today_ts: "pd.Timestamp",
+                   vix_max: float = VIX_MAX) -> bool:
+    """Gate for LONG entries: SPY > 200DMA AND VIX < vix_max. Fail-open on missing data."""
+    try:
+        spy_px = float(spy_close.asof(today_ts))
+        spy_m  = float(spy_ma.asof(today_ts))
+        vix_px = float(vix_close.asof(today_ts))
+    except Exception:
+        return True
+    return (spy_px > spy_m) and (vix_px < vix_max)
+
+
+def build_regime_series(raw, benchmark: str = BENCHMARK):
+    """Precompute regime series from raw OHLCV. Returns (spy_close, spy_ma, vix_close)
+    or (None, None, None) if either benchmark or ^VIX is missing."""
+    try:
+        spy_close = raw["Close"][benchmark].ffill()
+        spy_ma    = spy_close.rolling(SPY_MA_PERIOD).mean()
+        vix_close = raw["Close"]["^VIX"].ffill()
+        return spy_close, spy_ma, vix_close
+    except (KeyError, Exception):
+        return None, None, None

@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
 Technical analysis scanner — long-only strategy.
-  Rule: only consider LONG setups when price > SMA200.
-        Price < SMA200 → no trade (do not short, do not fight the tape).
+  Per-ticker rule: only consider LONG setups when price > SMA200.
+                   Price < SMA200 → no trade (do not short, do not fight the tape).
+  Market-wide gate: SPY > 200DMA AND VIX < 30 required for LONG entries.
+                    Gate closed → triggered setups are suppressed (parity with
+                    backtest.simulate).
   Skips entries where ATR% > MAX_ATR_PCT (extreme-volatility guardrail).
   Scans all top-100 S&P 500 stocks.
 """
@@ -15,48 +18,14 @@ try:
     import pandas as pd
     import yfinance as yf
     from universe import load_universe
-    from indicators import compute
-    from signals import score, quality
+    from indicators import compute, ticker_frame
+    from signals import (score, quality, market_regime, long_regime_ok,
+                         build_regime_series, MAX_ATR_PCT, VIX_MAX,
+                         SPY_MA_PERIOD, BENCHMARK)
 except ImportError:
     print("ERROR: Missing dependencies. Run:")
     print("  uv pip install yfinance pandas lxml requests --python .venv/bin/python3")
     sys.exit(1)
-
-MAX_ATR_PCT   = 4.0    # skip entries where ATR% exceeds this (vol-cap guardrail)
-SPY_MA_PERIOD = 200    # SPY trend filter for long-entry regime gate
-VIX_MAX       = 30.0   # block LONG entries when VIX >= this
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Regime helpers — single source of truth for algo-level market filters
-# ─────────────────────────────────────────────────────────────────────────────
-
-def market_regime(long_count: int, total: int) -> str:
-    """Breadth-based regime label from count of tickers above their SMA200."""
-    rate = long_count / total
-    short_count = total - long_count
-    base = f"{long_count}L / {short_count}S of {total}"
-    if rate >= 0.70:
-        return f"STRONG BULL ({base}) — broad uptrend, favour longs"
-    elif rate >= 0.50:
-        return f"MIXED ({base}) — selective longs, tighter stops"
-    elif rate >= 0.30:
-        return f"WEAKENING ({base}) — more shorts than longs, reduce long size"
-    else:
-        return f"BEAR ({base}) — majority below SMA200, favour shorts"
-
-
-def long_regime_ok(spy_close: "pd.Series", spy_ma: "pd.Series",
-                   vix_close: "pd.Series", today_ts: "pd.Timestamp",
-                   vix_max: float = VIX_MAX) -> bool:
-    """Gate for LONG entries: SPY > 200DMA AND VIX < vix_max. Fail-open on missing data."""
-    try:
-        spy_px = float(spy_close.asof(today_ts))
-        spy_m  = float(spy_ma.asof(today_ts))
-        vix_px = float(vix_close.asof(today_ts))
-    except Exception:
-        return True
-    return (spy_px > spy_m) and (vix_px < vix_max)
 
 
 def run(force_refresh: bool = False) -> None:
@@ -64,9 +33,12 @@ def run(force_refresh: bool = False) -> None:
     universe = load_universe(force_refresh=force_refresh)
     tickers = universe["Ticker"].tolist()
 
-    # ── Download full OHLCV (1 year daily) ───────────────────────────────────
-    print(f"Downloading 1-year OHLCV for {len(tickers)} tickers...", flush=True)
-    raw = yf.download(tickers, period="1y", interval="1d", auto_adjust=True, progress=False)
+    # ── Download full OHLCV (1 year daily) + regime data (SPY, ^VIX) ─────────
+    dl_tickers = tickers + [BENCHMARK, "^VIX"]
+    print(f"Downloading 1-year OHLCV for {len(dl_tickers)} tickers "
+          f"(universe + {BENCHMARK} + ^VIX)...", flush=True)
+    raw = yf.download(dl_tickers, period="1y", interval="1d",
+                      auto_adjust=True, progress=False)
     if raw.empty:
         print("ERROR: No data returned.")
         sys.exit(1)
@@ -75,18 +47,8 @@ def run(force_refresh: bool = False) -> None:
     long_rows, short_rows, triggered = [], [], []
 
     for ticker in tickers:
-        try:
-            df = pd.DataFrame({
-                "Open":   raw["Open"][ticker],
-                "High":   raw["High"][ticker],
-                "Low":    raw["Low"][ticker],
-                "Close":  raw["Close"][ticker],
-                "Volume": raw["Volume"][ticker],
-            }).dropna()
-        except (KeyError, TypeError):
-            continue
-
-        if len(df) < 200:
+        df = ticker_frame(raw, ticker)
+        if df is None or len(df) < 200:
             continue
 
         ind = compute(df)
@@ -125,10 +87,31 @@ def run(force_refresh: bool = False) -> None:
     short_count = len(short_rows)
     total       = long_count + short_count
 
-    # ── Market breadth ────────────────────────────────────────────────────────
+    # ── Market breadth + regime gate ─────────────────────────────────────────
     regime = market_regime(long_count, total)
     print(f"\n{'='*66}")
     print(f"  MARKET BREADTH | {regime}")
+
+    spy_close, spy_ma, vix_close = build_regime_series(raw)
+    gate_open = True
+    gate_detail = ""
+    if spy_close is not None:
+        today_ts = raw.index[-1]
+        gate_open = long_regime_ok(spy_close, spy_ma, vix_close, today_ts)
+        try:
+            spy_px = float(spy_close.asof(today_ts))
+            spy_m  = float(spy_ma.asof(today_ts))
+            vix_px = float(vix_close.asof(today_ts))
+            gate_detail = (f"SPY {spy_px:.2f} vs {SPY_MA_PERIOD}DMA {spy_m:.2f} | "
+                           f"VIX {vix_px:.1f} (limit {VIX_MAX:.0f})")
+        except Exception:
+            gate_detail = "regime values unavailable"
+    else:
+        gate_detail = "SPY or ^VIX missing — gate fail-open"
+
+    status = "OPEN — LONG entries allowed" if gate_open else "BLOCKED — LONG entries suppressed"
+    print(f"  REGIME GATE    | {status}")
+    print(f"                 | {gate_detail}")
     print(f"{'='*66}")
 
     # ── Long universe (price > SMA200) ────────────────────────────────────────
@@ -144,6 +127,18 @@ def run(force_refresh: bool = False) -> None:
         print(sdf.to_string(index=False))
 
     # ── Triggered setups ─────────────────────────────────────────────────────
+    if not gate_open:
+        n = len(triggered)
+        if n:
+            sample = ", ".join(f"{t['Ticker']}({t['setup']})" for t in triggered[:5])
+            if n > 5:
+                sample += f", +{n-5} more"
+            print(f"\nREGIME GATE CLOSED — suppressing {n} LONG trigger(s): {sample}")
+            print("Do not enter. Wait for SPY > 200DMA AND VIX < 30.")
+        else:
+            print("\nREGIME GATE CLOSED — no triggers anyway. Stay in cash.")
+        return
+
     if not triggered:
         print("\nNo setups triggered today.")
         return

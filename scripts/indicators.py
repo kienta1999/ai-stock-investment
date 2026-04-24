@@ -4,6 +4,24 @@
 import pandas as pd
 
 
+def ticker_frame(raw: pd.DataFrame, ticker: str, up_to: pd.Timestamp = None) -> pd.DataFrame:
+    """Slice a yfinance multi-ticker download into a per-ticker OHLCV frame.
+    Pass `up_to` to truncate at a given timestamp (backtest uses this to avoid look-ahead)."""
+    try:
+        df = pd.DataFrame({
+            "Open":   raw["Open"][ticker],
+            "High":   raw["High"][ticker],
+            "Low":    raw["Low"][ticker],
+            "Close":  raw["Close"][ticker],
+            "Volume": raw["Volume"][ticker],
+        })
+    except (KeyError, TypeError):
+        return None
+    if up_to is not None:
+        df = df.loc[:up_to]
+    return df.dropna()
+
+
 def compute(df: pd.DataFrame) -> dict:
     """
     df must have columns: Open, High, Low, Close, Volume

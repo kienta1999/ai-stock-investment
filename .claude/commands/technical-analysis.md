@@ -40,11 +40,11 @@ Each setup includes: Ticker | Setup type | **Quality** | Direction | Entry | SL 
 
 **Strategy rule — long-only.** When price < SMA200: **no trade.** Never short, never fight the dominant trend. When price > SMA200: scan for one of the four long setups below.
 
-**Market-wide regime gate (manual check before acting on any trigger):** even if a ticker's individual setup looks clean, skip ALL longs when either:
+**Market-wide regime gate (enforced automatically):** even if a ticker's individual setup looks clean, LONG entries are blocked when either:
 - **SPY < its 200-day MA** (broad market not in uptrend), OR
 - **VIX ≥ 30** (crash regime)
 
-The backtest enforces this automatically via `sma200_filter.long_regime_ok()`; the live scanner (`sma200_filter.py`) currently prints all triggers regardless, so the operator must sanity-check SPY and VIX themselves before taking the trade. Swung COVID-2020 alpha from -24.9pp → +30.4pp in the backtest — do not skip this check.
+Both the live scanner and the backtest call `signals.long_regime_ok()`. When the gate is closed, the scanner prints a REGIME GATE header line showing SPY vs 200DMA and VIX level, and suppresses the setup table entirely — there's no table to override. When the gate is OPEN, setups appear as usual. Swung COVID-2020 alpha from -24.9pp → +30.4pp in the backtest.
 
 **Setup types and their logic:**
 
