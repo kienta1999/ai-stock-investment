@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-Backtest: $10k, 1 trade at a time, March 20 → April 20 2026.
+Backtest: $10k, MAX_SLOTS concurrent trades, 2024-04-20 → 2026-04-20.
 Rules:
   - Scan at EOD, enter next trading day at open
-  - 1 trade at a time — only scan for next when current exits
+  - Up to MAX_SLOTS concurrent positions; capital split equally per slot
+    (each slot is an independent sub-account that compounds on its own)
+  - No two slots in the same ticker at once
   - Exit when TP or SL hit (daily High/Low check)
-  - 20-day time stop if neither hit
+  - TIME_STOP_DAYS time stop if neither hit
   - Skip day if no clean setup (don't force trades)
 """
 
@@ -18,6 +20,7 @@ import pandas as pd
 import yfinance as yf
 from universe import load_universe
 from indicators import compute, ticker_frame
+import signals as sg
 from signals import (score as score_setups, quality, MIN_QUALITY_SCORE,
                      long_regime_ok, build_regime_series,
                      MAX_ATR_PCT, SPY_MA_PERIOD, VIX_MAX, BENCHMARK)
@@ -130,111 +133,142 @@ def simulate_trade(ticker: str, direction: str,
 
 def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, *,
              capital_init: float = CAPITAL_INIT,
+             max_slots: int = None,
              spy_close=None, spy_ma=None, vix_close=None,
              verbose: bool = False) -> tuple:
-    """Run the scan-pick-enter-exit loop over bt_dates. Returns (capital, trades, regime_blocked_days).
-    If regime series are provided, applies the LONG entry gate from sma200_filter.long_regime_ok."""
-    regime_ready = spy_close is not None and spy_ma is not None and vix_close is not None
+    """Run the scan-pick-enter-exit loop over bt_dates with up to N concurrent slots.
+    Each slot starts with capital_init/N and compounds independently. Returns
+    (total_capital, trades, regime_blocked_days). If regime series are provided,
+    applies the LONG entry gate from signals.long_regime_ok.
 
-    capital   = capital_init
-    trades    = []
-    active    = None
-    scan_from = bt_dates[0]
+    max_slots=None reads sg.MAX_SLOTS at call time (so tune.py overrides apply)."""
+    regime_ready = spy_close is not None and spy_ma is not None and vix_close is not None
+    n_slots = max_slots if max_slots is not None else sg.MAX_SLOTS
+
+    # Each slot: independent sub-account. trade["capital_after"] is slot capital.
+    slots = [{"capital": capital_init / n_slots, "active": None, "idx": i}
+             for i in range(n_slots)]
+    trades = []
     regime_blocked_days = 0
 
+    def held_tickers():
+        return {s["active"]["ticker"] for s in slots if s["active"] is not None}
+
     for today in bt_dates:
-        # ── Exit active trade if its exit_date has arrived ───────────────────
-        if active and today >= active["exit_date"]:
-            pnl_pct = active["pnl_pct"]
-            pnl_usd = capital * (pnl_pct / 100)
-            capital += pnl_usd
-            active["pnl_usd"] = round(pnl_usd, 2)
-            active["capital_after"] = round(capital, 2)
-            trades.append(active)
-            if verbose:
-                print(f"  EXIT  {active['ticker']:6s} {active['direction']:5s} | "
-                      f"{active['outcome']} @ {active['exit_price']}  "
-                      f"P&L: {pnl_pct:+.1f}% (${pnl_usd:+.0f})  "
-                      f"Capital: ${capital:,.0f}")
-            active = None
-            scan_from = today
+        # ── 1. Exit any slot whose trade ended today ─────────────────────────
+        for slot in slots:
+            tr = slot["active"]
+            if tr and today >= tr["exit_date"]:
+                pnl_usd = slot["capital"] * (tr["pnl_pct"] / 100)
+                slot["capital"] += pnl_usd
+                tr["pnl_usd"] = round(pnl_usd, 2)
+                tr["capital_after"] = round(slot["capital"], 2)
+                tr["slot"] = slot["idx"]
+                trades.append(tr)
+                if verbose:
+                    print(f"  EXIT  S{slot['idx']} {tr['ticker']:6s} {tr['direction']:5s} | "
+                          f"{tr['outcome']} @ {tr['exit_price']}  "
+                          f"P&L: {tr['pnl_pct']:+.1f}% (${pnl_usd:+.0f})  "
+                          f"Slot cap: ${slot['capital']:,.0f}")
+                slot["active"] = None
 
-        # ── Scan for next setup if idle ──────────────────────────────────────
-        if active is None and today >= scan_from:
-            today_ts = pd.Timestamp(today)
-            candidates = []
+        free_slots = [s for s in slots if s["active"] is None]
+        if not free_slots:
+            continue
 
-            long_allowed = (long_regime_ok(spy_close, spy_ma, vix_close, today_ts)
-                            if regime_ready else True)
+        # ── 2. Scan once, gather all candidates ──────────────────────────────
+        today_ts = pd.Timestamp(today)
+        long_allowed = (long_regime_ok(spy_close, spy_ma, vix_close, today_ts)
+                        if regime_ready else True)
 
-            for ticker in tickers:
-                df = ticker_frame(raw, ticker, up_to=today_ts)
-                if df is None or len(df) < 200:
-                    continue
-
-                ind = compute(df)
-                if not ind:
-                    continue
-                if ind.get("atr_pct", 0) > MAX_ATR_PCT:
-                    continue
-
-                for s in score_setups(ind):
-                    if s.get("direction", "LONG") == "LONG" and not long_allowed:
-                        continue
-                    q = quality({**ind, **s})
-                    candidates.append({"ticker": ticker, "quality": q, **ind, **s})
-
-            if not candidates:
-                if not long_allowed:
-                    regime_blocked_days += 1
+        candidates = []
+        for ticker in tickers:
+            df = ticker_frame(raw, ticker, up_to=today_ts)
+            if df is None or len(df) < 200:
                 continue
-
-            best = max(candidates, key=lambda x: x["quality"])
-            if best["quality"] < MIN_QUALITY_SCORE:
+            ind = compute(df)
+            if not ind:
                 continue
-
-            future = [d for d in all_dates if d > today]
-            if not future:
+            if ind.get("atr_pct", 0) > MAX_ATR_PCT:
                 continue
-            entry_date = future[0]
+            for s in score_setups(ind):
+                if s.get("direction", "LONG") == "LONG" and not long_allowed:
+                    continue
+                q = quality({**ind, **s})
+                candidates.append({"ticker": ticker, "quality": q, **ind, **s})
 
+        if not candidates:
+            if not long_allowed:
+                regime_blocked_days += 1
+            continue
+
+        # ── 3. Pick top-N by quality, dedup tickers (incl. already held) ─────
+        held = held_tickers()
+        candidates.sort(key=lambda x: x["quality"], reverse=True)
+
+        picks = []
+        seen = set(held)
+        for c in candidates:
+            if c["quality"] < MIN_QUALITY_SCORE:
+                break  # sorted desc — once below floor, all rest are too
+            if c["ticker"] in seen:
+                continue
+            seen.add(c["ticker"])
+            picks.append(c)
+            if len(picks) >= len(free_slots):
+                break
+
+        if not picks:
+            continue
+
+        # ── 4. Enter trades, one pick per free slot ──────────────────────────
+        future = [d for d in all_dates if d > today]
+        if not future:
+            continue
+        entry_date = future[0]
+
+        for slot, pick in zip(free_slots, picks):
             result = simulate_trade(
-                ticker=best["ticker"], direction=best["direction"],
-                entry=best["entry"], sl=best["sl"], tp=best["tp"],
+                ticker=pick["ticker"], direction=pick["direction"],
+                entry=pick["entry"], sl=pick["sl"], tp=pick["tp"],
                 entry_date=entry_date, raw=raw, all_dates=all_dates,
             )
             if not result:
                 continue
-
-            active = result
+            slot["active"] = result
             if verbose:
-                print(f"  ENTER {result['ticker']:6s} {result['direction']:5s} | "
-                      f"Setup: {best['setup']:<20s} Quality: {best['quality']}  "
+                print(f"  ENTER S{slot['idx']} {result['ticker']:6s} {result['direction']:5s} | "
+                      f"Setup: {pick['setup']:<20s} Quality: {pick['quality']}  "
                       f"Entry: {result['entry']}  SL: {result['sl']}  TP: {result['tp']}  "
-                      f"RSI: {best['rsi']:.0f}  Vol: {best['vol_ratio']:.1f}x  "
+                      f"RSI: {pick['rsi']:.0f}  Vol: {pick['vol_ratio']:.1f}x  "
                       f"Scan: {today}  Enter: {entry_date}")
 
-    # ── Close any open trade at end of window ────────────────────────────────
-    if active:
-        last_date = bt_dates[-1]
+    # ── Close any still-open trades at end of window ─────────────────────────
+    last_date = bt_dates[-1]
+    for slot in slots:
+        tr = slot["active"]
+        if not tr:
+            continue
         try:
-            ep = float(raw["Close"][active["ticker"]].loc[pd.Timestamp(last_date)])
+            ep = float(raw["Close"][tr["ticker"]].loc[pd.Timestamp(last_date)])
         except Exception:
-            ep = active["entry"]
-        pnl_pct = ((ep - active["entry"]) / active["entry"] * 100
-                   if active["direction"] == "LONG"
-                   else (active["entry"] - ep) / active["entry"] * 100)
-        pnl_usd = capital * (pnl_pct / 100)
-        capital += pnl_usd
-        active.update({"exit_price": round(ep, 2), "outcome": "OPEN@END",
-                       "pnl_pct": round(pnl_pct, 2), "pnl_usd": round(pnl_usd, 2),
-                       "capital_after": round(capital, 2)})
-        trades.append(active)
+            ep = tr["entry"]
+        pnl_pct = ((ep - tr["entry"]) / tr["entry"] * 100
+                   if tr["direction"] == "LONG"
+                   else (tr["entry"] - ep) / tr["entry"] * 100)
+        pnl_usd = slot["capital"] * (pnl_pct / 100)
+        slot["capital"] += pnl_usd
+        tr.update({"exit_price": round(ep, 2), "outcome": "OPEN@END",
+                   "pnl_pct": round(pnl_pct, 2), "pnl_usd": round(pnl_usd, 2),
+                   "capital_after": round(slot["capital"], 2),
+                   "slot": slot["idx"]})
+        trades.append(tr)
         if verbose:
-            print(f"  OPEN  {active['ticker']:6s} still open — marked at ${ep:.2f}  "
+            print(f"  OPEN  S{slot['idx']} {tr['ticker']:6s} still open — marked at ${ep:.2f}  "
                   f"P&L: {pnl_pct:+.1f}% (${pnl_usd:+.0f})")
 
-    return capital, trades, regime_blocked_days
+    total_capital = sum(s["capital"] for s in slots)
+    return total_capital, trades, regime_blocked_days
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,9 +344,11 @@ def run():
         print(f"    Alpha:     {alpha:+.1f} pp   [{verdict}]")
     print(f"\n  Trade log:")
 
-    display_cols = ["ticker","direction","entry_date","entry","sl","tp",
+    display_cols = ["slot","ticker","direction","entry_date","entry","sl","tp",
                     "exit_date","exit_price","outcome","days_held","pnl_pct","pnl_usd","capital_after"]
+    display_cols = [c for c in display_cols if c in df.columns]
     print(df[display_cols].to_string(index=False))
+    print(f"\n  Slots: {sg.MAX_SLOTS}  (each started at ${CAPITAL_INIT/sg.MAX_SLOTS:,.0f})")
 
 
 if __name__ == "__main__":

@@ -402,6 +402,46 @@ The COVID and GFC results are strong evidence against in-sample fitting: neither
 
 ---
 
+## Tuning session round 4 (2026-04-25) — concurrent slot count (MAX_SLOTS) — kept at 1
+
+### Question
+
+The single-trade backtest leaves capital idle most days. Would running 2–4 concurrent positions deploy that idle cash for higher returns, or would the diversification noise hurt? Added `MAX_SLOTS` to `signals.py` and refactored `backtest.simulate` so each slot is its own sub-account starting at `$10k / N` and compounding independently. Same-ticker dedup across slots; later signals fill empty slots first-come-first-served (no swap-on-better-quality).
+
+### What we did
+
+Ran a 4-variation `MAX_SLOTS ∈ {1, 2, 3, 4}` sweep on both windows (IS: 2024-04-20 → 2025-04-20, OOS: 2025-04-20 → 2026-04-20). The Baseline run uses the file default (also 1) and confirmed no state leakage — its alpha matched `SLOTS=1` exactly.
+
+### Result
+
+| Variation | IS alpha   | OOS alpha   | Sum         |
+| --------- | ---------- | ----------- | ----------- |
+| Baseline  | **+53.8pp** | **+33.2pp** | **+87.0pp** |
+| SLOTS=1   | +53.8pp    | +33.2pp     | +87.0pp     |
+| SLOTS=2   | +30.1pp    | +13.2pp     | +43.2pp     |
+| SLOTS=3   | —          | —           | failed +10pp floor |
+| SLOTS=4   | —          | —           | failed +10pp floor |
+
+Each additional slot cut alpha roughly in half. SLOTS=3 and SLOTS=4 were so degraded they didn't clear the +10pp floor on at least one window.
+
+### Why more slots hurt
+
+The scanner's edge is concentrated in the **top-quality signal of the day**, not spread evenly across all triggers. Slots 2–N are forced to take the 2nd/3rd/4th-best candidates, whose quality scores are meaningfully lower. We're effectively paying to ignore the quality ranking that does most of the work. A 4-slot smoke test on a tail window showed 28% win rate (50 trades) vs 40% (10 trades) for single-slot — same data, lower-quality picks dragging the mean.
+
+This is the opposite of what diversification literature predicts, and it's a property of the scanner specifically: candidates aren't IID drawings from a positive-EV pool. They're rank-ordered by an edge signal, and the edge is real.
+
+### Verdict
+
+**`MAX_SLOTS = 1` stays as the proven default.** The mechanism remains in place as a tunable knob — useful for future sweeps if the scanner is ever changed to produce flatter quality distributions — but production behavior is unchanged.
+
+If idle cash drag becomes a concern later, the right fix is a **portfolio overlay** (park unused $ in SPY or a money-market fund and pull when a signal fires), not adding slots. That's a separate, smaller change and doesn't compromise the conviction-on-best-signal property that drives this scanner's alpha.
+
+### Methodological note
+
+Round 4 also reinforces a pattern from earlier rounds: when an "obviously good" idea (more diversification) underperforms, trust the deterministic backtest. Diversification is good *when components are uncorrelated and equal-EV* — neither holds here.
+
+---
+
 ## MCP Servers (optional tooling)
 
 ### Prerequisites

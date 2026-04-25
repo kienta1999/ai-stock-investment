@@ -22,6 +22,12 @@ MAX_ATR_PCT    = 4.0    # skip entries where ATR% exceeds this (vol-cap guardrai
 SPY_MA_PERIOD  = 200    # SPY trend filter for long-entry regime gate
 VIX_MAX        = 30.0   # block LONG entries when VIX >= this
 BENCHMARK      = "SPY"  # market benchmark (regime gate + buy-and-hold comparison)
+MAX_SLOTS      = 1      # max concurrent positions; capital split equally per slot
+                        # (each slot = its own sub-account, compounds independently)
+                        # Tuned 2026-04-25: SLOTS=1 wins decisively. SLOTS=2 cuts
+                        # alpha sum by ~half (+43.2pp vs +87.0pp); SLOTS=3-4 fail
+                        # the +10pp floor on at least one window. Slots 2-N grab
+                        # lower-quality picks and drag returns. See README.
 
 
 # ─────────────────────────────────────────────────────────────────────────────

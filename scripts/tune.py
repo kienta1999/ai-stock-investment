@@ -5,10 +5,11 @@ Parameter tuner with train/test split and grid search.
   In-sample (tune on):     2024-04-20 → 2025-04-20  (Year 1)
   Out-of-sample (validate): 2025-04-20 → 2026-04-20  (Year 2)
 
-L2/L3 grid (round 2, 2026-04-23): probes whether the MACD Cross and VWAP
-Support setups have over-tight thresholds. Holds L1 at the post-tuning
-defaults (L1_MIN_VOL_RATIO=1.3) and varies L2 vol/RSI/TP and L3 vol/VWAP
-distance/RSI. 288 Cartesian-product variations.
+MAX_SLOTS sweep (2026-04-25): tests whether running 1–4 concurrent positions
+beats the single-trade baseline. Each slot is its own sub-account starting
+with $10k/N and compounding independently (see backtest.simulate). Tradeoff:
+more slots = more deployment + diversification, but lower-quality picks fill
+slots 2-N, which can hurt win rate. 4 variations.
 
 OHLCV data is cached to data/raw_ohlcv_2y.pkl (7-day TTL) to avoid yfinance
 rate-limit hits on repeated runs. Delete the file or pass --refresh to bust.
@@ -91,7 +92,7 @@ def apply_overrides(overrides: dict):
 def snapshot_baseline() -> dict:
     return {k: getattr(sg, k) for k in dir(sg)
             if (k.startswith(("Q_", "L1_", "L2_", "L3_", "L4_"))
-                or k == "MIN_QUALITY_SCORE")}
+                or k in ("MIN_QUALITY_SCORE", "MAX_SLOTS"))}
 
 
 def spy_return(raw, bt_dates):
@@ -119,17 +120,13 @@ def run_one(raw, tickers, all_dates, bt_dates, bench_ret, regime):
 # ─────────────────────────────────────────────────────────────────────────────
 
 GRID = {
-    # L3 — VWAP Support (round 3: non-volume dimensions)
-    # L3_MIN_VOL_RATIO stays at 1.0 — we proved raising it breaks L3 (mean-reversion
-    # setup; heavy vol on dips = distribution, not conviction)
-    "L3_VWAP_DIST_MAX":   [1.0, 1.5, 2.0, 3.0],  # default 1.5; tighter = only real touches
-    "L3_MIN_RSI":         [40, 45, 50],           # default 45; test both directions
-    "L3_MIN_ABOVE_MID_5D":[0, 1, 2],              # default 1; how many of last 5 above BB mid
-    "L3_SL_ATR":          [1.5, 2.0, 2.5],        # default 2.0; tighter = smaller losses
-    "L3_TP_ATR":          [2.5, 3.0, 4.0],        # default 3.0; VWAP bounces short
+    # Portfolio-level: number of concurrent positions. 1 = current SOT baseline.
+    # 2–4 split capital equally per slot; later signals fill empty slots only
+    # (no swap-on-better-quality). Filling slot 2-N forces lower-quality picks,
+    # so this isn't free — that's exactly what the sweep is measuring.
+    "MAX_SLOTS":          [1, 2, 3, 4],
 }
-# = 4 × 3 × 3 × 3 × 3 = 324 variations
-# L1 and L2 stay at post-tuning defaults (vol threshold 1.3 applied)
+# = 4 variations
 
 
 def build_variations():
@@ -137,14 +134,7 @@ def build_variations():
     keys = list(GRID.keys())
     for combo in itertools.product(*GRID.values()):
         overrides = dict(zip(keys, combo))
-        # Compact name: L3VW2.0_L3R45_L3BB1_L3SL2.0_L3TP3.0
-        short = (
-            f"L3VW{overrides['L3_VWAP_DIST_MAX']}"
-            f"_L3R{overrides['L3_MIN_RSI']}"
-            f"_L3BB{overrides['L3_MIN_ABOVE_MID_5D']}"
-            f"_L3SL{overrides['L3_SL_ATR']}"
-            f"_L3TP{overrides['L3_TP_ATR']}"
-        )
+        short = f"SLOTS={overrides['MAX_SLOTS']}"
         variations.append((short, overrides))
     return variations
 
