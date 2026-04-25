@@ -442,6 +442,41 @@ Round 4 also reinforces a pattern from earlier rounds: when an "obviously good" 
 
 ---
 
+## Next steps
+
+Do these in order. Each one is a single, self-contained change. After each, re-run `scripts/backtest.py` on the 2024-2026 window. If alpha drops, revert and move on.
+
+### Do next (in this order)
+
+**1. Re-run old backtests with the regime gate.** The 2022-2024 number in the README (+16.2pp) is from *before* the regime gate was added. Re-run it. Then run 2015 and 2018 too — both are different regimes (chop, vol shock) we haven't seen. No code change needed; just edit `START_DATE` / `END_DATE` at the top of `backtest.py`.
+
+**2. Skip trades near earnings.** Before entering any trade, check if the company reports earnings in the next 7-10 trading days. If yes, skip. Use `yfinance.Ticker(t).get_earnings_dates()`. Add the check inside the candidate loop in `simulate()` (backtest.py) and in the live scanner (`sma200_filter.py`). One filter, applied in both places.
+
+**3. Relative-strength filter.** Before entering, check that the ticker's 3-month and 6-month return are in the top 25% of the universe vs SPY. If not, skip. Add it next to the earnings filter. Goal: stop buying former winners that have started underperforming.
+
+**4. Sell half at breakeven, let the rest run.** Currently when price hits the 50%-to-TP mark, we move SL to entry. Change it: sell half the position at that point, leave half running with the BE stop. Edit `simulate_trade()` in `backtest.py` — track two halves separately.
+
+**5. Trail the runner after breakeven.** Same code path as #4. Once BE has triggered, instead of holding SL=entry, set SL = `max(entry, highest_high_since_entry − 3×ATR)`. Recalculate each day. Captures big winners that currently cap at 4×ATR TP.
+
+**6. ADX > 20 on L1 and L4.** L1 (Ride Uptrend) and L4 (Pre-Golden Cross) assume a trend. Require ADX(14) > 20 to confirm one exists. Add ADX to `indicators.py`, then add `ind["adx"] > 20` to the L1 and L4 conditions in `signals.py`. Don't apply to L2 or L3.
+
+### Don't bother — already settled
+
+| Idea | Why skip |
+| --- | --- |
+| More walk-forward / OOS validation | `tune.py` already does IS/OOS every round. COVID, 2022-24, and GFC are all OOS-tested. |
+| Per-setup P&L breakdown | Done. See round-3 table. |
+| Multi-position sizing (2-8 concurrent slots) | **Tested in round 4. Cut alpha in half.** Don't reopen. |
+| Three-mode regime-scaled exposure | Doesn't apply at SLOTS=1; binary gate already covers the off-leg. |
+| MFI, breadth indicator, 52-week-high gate | Duplicate work — volume, breadth, and SMA200 already do this. |
+| New setups (breakout, post-earnings drift) | Premature until #2 lands and L4 (n=1) is fixed. |
+
+### Rule for each step
+
+Run the **continuous** backtest before declaring victory. `tune.py`'s per-window numbers have been wrong about both magnitude and direction in past rounds. The only verdict that counts is `scripts/backtest.py` end-to-end alpha.
+
+---
+
 ## MCP Servers (optional tooling)
 
 ### Prerequisites
