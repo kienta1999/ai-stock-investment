@@ -1,0 +1,83 @@
+name: Daily SMA200 Scan
+
+on:
+  schedule:
+    # 9:30 AM ET in UTC: 13:30 (EDT, Mar–Nov) and 14:30 (EST, Nov–Mar)
+    # Both are scheduled; the gate step ensures only the one matching the
+    # current US/Eastern hour actually runs.
+    - cron: '30 13 * * 1-5'
+    - cron: '30 14 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Override output date (YYYY-MM-DD). Defaults to today in NY.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve run flag and date
+        id: gate
+        run: |
+          ny_hour=$(TZ='America/New_York' date +%H)
+          ny_dow=$(TZ='America/New_York' date +%u)
+          ny_today=$(TZ='America/New_York' date +%Y-%m-%d)
+          echo "NY date=$ny_today hour=$ny_hour dow=$ny_dow event=${{ github.event_name }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            override='${{ inputs.date }}'
+            chosen="${override:-$ny_today}"
+            echo "Manual run — bypassing gate. date=$chosen"
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "date=$chosen" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$ny_dow" -gt 5 ]; then
+            echo "Weekend in NY — skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$ny_hour" != "09" ]; then
+            echo "Not 9 AM ET hour — skipping (other DST cron will fire)."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "run=true" >> "$GITHUB_OUTPUT"
+          echo "date=$ny_today" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: pip install yfinance pandas lxml requests
+
+      - name: Run scanner
+        if: steps.gate.outputs.run == 'true'
+        working-directory: scripts
+        run: |
+          mkdir -p ../scans
+          python sma200_filter.py > "../scans/${{ steps.gate.outputs.date }}.txt"
+
+      - name: Commit output
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scans/
+          git diff --staged --quiet || \
+            git commit -m "scan: ${{ steps.gate.outputs.date }}"
+          git push
