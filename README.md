@@ -11,12 +11,15 @@ Alpha:   +126.9 pp   [BEAT ✓]
 42 trades, 22W / 20L, 52% win rate
 ```
 
-Also survives regime change:
+Out-of-sample regime sweep (all tuned on 2024-2026, run with regime gate live):
 
+- **2008 GFC full cycle** (2007-10-10 → 2009-12-31): +30.2% vs SPY -24.1% → **+54.4pp alpha**, gate blocked 337 days
 - **2020 COVID crash** (2020-02-19 → 2020-12-31): +42.4% vs SPY +12.0% → **+30.4pp alpha**, 60% win rate
-- **2008 GFC full cycle** (2007-10-10 → 2009-12-31): +30.2% vs SPY -24.1% → **+54.4pp alpha**, 18 trades, regime gate blocked 337 days
+- **2022 bear + 2023 recovery** (2022-01-01 → 2024-01-01): +19.1% vs SPY +2.6% → **+16.4pp alpha**, gate blocked 187 days
+- **2018 vol shock** (2018-01-01 → 2019-01-01): +1.0% vs SPY -5.2% → **+6.3pp alpha**, gate blocked 15 days (Feb VIX, Q4 selloff)
+- **2015 chop** (2015-01-01 → 2016-01-01): **-12.9% vs SPY +1.3% → -14.2pp alpha [LOST ✗]**, 2W/12L, gate only blocked 46 days
 
-Both windows are pure out-of-sample (tuned on 2024-2026). The market-wide regime gate is what carries the crisis windows.
+The crisis windows (GFC, COVID, 2022 bear, 2018 shock) all clear because the regime gate kicks in. **2015 is the failure mode**: a textbook flat/chop year where SPY stayed above its 200DMA all year, the gate barely engaged, and every trend setup whipsawed. The strategy needs a trend; it has no defense against a year-long sideways grind.
 
 ---
 
@@ -334,18 +337,21 @@ Tune.py predicted Y2 alpha would jump from -3.1pp to +33.2pp (+36pp Y2 improveme
 
 **Key methodological rule going forward:** always re-run `scripts/backtest.py` for continuous validation after ANY tune.py experiment. Per-window numbers can mislead in both magnitude and direction.
 
-### Out-of-sample validation — 2022-01-01 → 2024-01-01 (pre-regime-gate)
+### Out-of-sample regime sweep (2026-04-25) — 2015, 2018, 2022-24 with regime gate live
 
-Ran the post-tuning config (L1V1.3 + L2V1.3, current defaults) on a completely different regime — 2022 Fed-hiking bear + 2023 recovery — to confirm we're not just overfit to 2024-2026. These numbers are from **before** the regime gate was added; worth re-running now that the gate is live.
+Ran the post-tuning config (L1V1.3 + L2V1.3, current defaults, regime gate on) across three OOS windows that span a chop year, a vol shock, and a bear+recovery cycle. Tune window remains 2024-2026 only.
 
-```
-$10,000 → $11,885   (+18.9%)
-SPY B&H: +2.6%
-Alpha:   +16.2 pp    [BEAT ✓]
-43 trades, 15W / 28L, 35% win rate
-```
+| Window                                | Result                                | Win rate | Gate-blocked days | Verdict      |
+| ------------------------------------- | ------------------------------------- | -------- | ----------------- | ------------ |
+| 2022-01-01 → 2024-01-01 (bear+recov)  | +19.1% vs SPY +2.6% → **+16.4pp**     | 42% (13/18) | 187            | **BEAT ✓**   |
+| 2018-01-01 → 2019-01-01 (vol shock)   | +1.0% vs SPY -5.2% → **+6.3pp**       | 35% (8/15)  | 15             | **BEAT ✓**   |
+| 2015-01-01 → 2016-01-01 (chop)        | -12.9% vs SPY +1.3% → **-14.2pp**     | 14% (2/12)  | 46             | **LOST ✗**   |
 
-Win rate dropped to 35% in chop (vs 46% in trending bull) but trailing-to-breakeven saved many would-be losers — many SL exits show 0.0% P&L. The strategy still produced **6× the SPY return** in a flat/bear window. Structural protections (long-only + SMA200 gate + ATR vol cap) kept it from blowing up in 2022 carnage.
+**2022-24 with gate vs without:** +16.4pp (gate-on) vs +16.2pp (gate-off, prior README number). The gate blocked 187 days but the resulting alpha is virtually identical — the 2022 bear had enough VIX>30 days that the structural protections (SMA200 + ATR vol cap) were already catching most of what the gate would block.
+
+**2018 vol shock:** the gate fired during the Feb VIX spike and the Q4 selloff. Even with a 35% win rate the strategy turned a -5.2% SPY year into +1.0%. This is the gate's job — sit out the worst days, take what's left.
+
+**2015 chop is the failure mode.** SPY ended +1.3% with no sustained trend in either direction; it stayed above its 200DMA almost all year, so the gate only engaged on 46 days. Every L1/L4 trend setup walked into noise — 14% win rate, 12 stops out of 14 trades. The regime gate is binary (trending up vs crash); it has no detection for "no trend at all." This is a real, structural cost of a long-only trend strategy and it should not be hand-waved.
 
 ## Regime gate (2026-04-23) — SPY>200DMA + VIX<30 for LONG entries
 
@@ -455,7 +461,7 @@ Do these in order. Each one is a single, self-contained change. After each, re-r
 
 ### Do next (in this order)
 
-**1. Re-run old backtests with the regime gate.** The 2022-2024 number in the README (+16.2pp) is from _before_ the regime gate was added. Re-run it. Then run 2015 and 2018 too — both are different regimes (chop, vol shock) we haven't seen. No code change needed; just edit `START_DATE` / `END_DATE` at the top of `backtest.py`.
+**1. ~~Re-run old backtests with the regime gate.~~** ✅ **Done 2026-04-25.** 2022-24 essentially unchanged with gate on (+16.4pp). 2018 vol shock beats SPY by +6.3pp. **2015 chop loses by -14.2pp** — first OOS window where the strategy fails. See "Out-of-sample regime sweep" section above. Implication for items below: chop is the unsolved regime — fixes should target false-signal rate in non-trending markets (items #3 and #6 are most relevant here).
 
 **2. Skip trades near earnings.** Before entering any trade, check if the company reports earnings in the next 7-10 trading days. If yes, skip. Use `yfinance.Ticker(t).get_earnings_dates()`. Add the check inside the candidate loop in `simulate()` (backtest.py) and in the live scanner (`sma200_filter.py`). One filter, applied in both places.
 
@@ -523,7 +529,7 @@ claude mcp list
 
 ## Disclaimer
 
-This is backtested on historical data. Past performance does not guarantee future results. The strategy's setup thresholds (L1/L2/L3) were tuned against the 2024-2026 window, so some in-sample fit exists there; the regime gate and core rules survive the 2020 COVID, 2022-2024, and 2007-2009 GFC out-of-sample windows. Treat the +126.9pp / +30.4pp / +54.4pp alphas as reasoned starting points, not promises. The 2009 sub-window underperformance (-26.8pp against the V-recovery) is a known structural cost of regime-gated strategies.
+This is backtested on historical data. Past performance does not guarantee future results. The strategy's setup thresholds (L1/L2/L3) were tuned against the 2024-2026 window, so some in-sample fit exists there; the regime gate and core rules survive the 2020 COVID, 2018 vol shock, 2022-2024 bear, and 2007-2009 GFC out-of-sample windows. Treat the alphas as reasoned starting points, not promises. Two known failure modes: (1) the 2009 sub-window underperformance (-26.8pp against the V-recovery) is a structural cost of regime-gated strategies — they can't distinguish "bottom is in" from "bear rally"; (2) **2015-style chop loses -14.2pp** — when SPY drifts sideways above its 200DMA all year, the regime gate barely engages and trend setups whipsaw. The strategy needs a trend in either direction; it has no defense against year-long range-bound markets.
 
 ## Claude session
 
