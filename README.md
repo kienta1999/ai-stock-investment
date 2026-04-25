@@ -30,10 +30,12 @@ Both windows are pure out-of-sample (tuned on 2024-2026). The market-wide regime
 ### 2. Direction rule (the one that makes everything work)
 
 **Per-ticker filter:**
+
 - **price > SMA200 → consider LONG setups only.**
 - **price < SMA200 → no trade.** Never short, never fight the dominant trend.
 
 **Market-wide regime gate (added 2026-04-23):** even for tickers above their own SMA200, block LONG entries when either:
+
 - **SPY close < SPY 200-day MA** (broad market not in uptrend), OR
 - **VIX ≥ 30** (crash regime — don't catch falling knives)
 
@@ -204,20 +206,20 @@ Ran `scripts/tune.py` — 108-variation grid search across `MIN_QUALITY_SCORE`, 
 
 The tuner showed two attractive picks:
 
-| Pick                                       | Y1 alpha (per-window) | Y2 alpha (per-window) |
-| ------------------------------------------ | --------------------- | --------------------- |
-| `L1_MIN_VOL_RATIO=1.3` + `L1_TP_ATR=5.0`   | +24.4pp               | +21.8pp               |
-| Just `L1_MIN_VOL_RATIO=1.3`                | +20–30pp              | +16–18pp              |
+| Pick                                     | Y1 alpha (per-window) | Y2 alpha (per-window) |
+| ---------------------------------------- | --------------------- | --------------------- |
+| `L1_MIN_VOL_RATIO=1.3` + `L1_TP_ATR=5.0` | +24.4pp               | +21.8pp               |
+| Just `L1_MIN_VOL_RATIO=1.3`              | +20–30pp              | +16–18pp              |
 
 We tried the first pick first (volume + wider TP). Continuous backtest result: **-10.5pp alpha — LOST to SPY**.
 
 Reverted to just the volume change. Continuous backtest: **+52.5pp alpha (vs baseline +50.1pp)**.
 
-So the volume-only change is a real win, but only **+2.4pp better than baseline** — not the +20pp the tuner predicted. The wider TP actively *hurt* in continuous mode (longer holds → more time-stop exits → fewer trades cycle through → less compounding) even though per-window analysis liked it.
+So the volume-only change is a real win, but only **+2.4pp better than baseline** — not the +20pp the tuner predicted. The wider TP actively _hurt_ in continuous mode (longer holds → more time-stop exits → fewer trades cycle through → less compounding) even though per-window analysis liked it.
 
 ### Lesson
 
-**`tune.py`'s per-window-with-fresh-capital framework is useful for *ranking* parameter directions but wildly unreliable for predicting *continuous* P&L magnitude.** It's a screening tool, not a final verdict. Always re-validate any tuner finding by running the full continuous `backtest.py` before shipping.
+**`tune.py`'s per-window-with-fresh-capital framework is useful for _ranking_ parameter directions but wildly unreliable for predicting _continuous_ P&L magnitude.** It's a screening tool, not a final verdict. Always re-validate any tuner finding by running the full continuous `backtest.py` before shipping.
 
 ### What's next
 
@@ -235,34 +237,34 @@ Output is saved to `/tmp/tune-l2l3.log` — read that file the next morning if t
 
 ### What we did
 
-Ran the 288-variation L2/L3 grid overnight. Per-window analysis was inconclusive — only 4 variations cleared the +10pp/+10pp floor and they all *lost* to the post-L1V1.3 baseline on Y1 (+30.7pp vs baseline +67.6pp) while winning Y2 (+16.3pp vs +7.1pp). Not a clean signal.
+Ran the 288-variation L2/L3 grid overnight. Per-window analysis was inconclusive — only 4 variations cleared the +10pp/+10pp floor and they all _lost_ to the post-L1V1.3 baseline on Y1 (+30.7pp vs baseline +67.6pp) while winning Y2 (+16.3pp vs +7.1pp). Not a clean signal.
 
 Tried the single most theoretically-motivated change anyway (`L2_MIN_VOL_RATIO: 1.0 → 1.3`, paralleling yesterday's L1 finding) and ran the continuous backtest.
 
 ### Continuous backtest result
 
-| Metric          | L1V1.3 only | +L2V1.3       | Δ          |
-| --------------- | ----------- | ------------- | ---------- |
-| Return          | +98.1%      | **+121.8%**   | **+23.7pp** |
-| Alpha           | +52.5pp     | **+76.3pp**   | **+23.8pp** |
-| End cap ($10k)  | $19,809     | **$22,183**   | +$2,374    |
-| Trades          | 30          | **41**        | +11        |
-| Win rate        | 47%         | 46%           | ≈ same     |
+| Metric         | L1V1.3 only | +L2V1.3     | Δ           |
+| -------------- | ----------- | ----------- | ----------- |
+| Return         | +98.1%      | **+121.8%** | **+23.7pp** |
+| Alpha          | +52.5pp     | **+76.3pp** | **+23.8pp** |
+| End cap ($10k) | $19,809     | **$22,183** | +$2,374     |
+| Trades         | 30          | **41**      | +11         |
+| Win rate       | 47%         | 46%         | ≈ same      |
 
 ### Why it worked — capital recycling, not setup selection
 
-The L2 filter **didn't make L2 triggers better** — same 3 L2 trades (TJX/META/QCOM) in both runs. Instead, raising the L2 volume gate *kept the scanner from getting trapped in slow-grinder L2 entries that were blocking capital from faster-recycling L1/L3 opportunities*.
+The L2 filter **didn't make L2 triggers better** — same 3 L2 trades (TJX/META/QCOM) in both runs. Instead, raising the L2 volume gate _kept the scanner from getting trapped in slow-grinder L2 entries that were blocking capital from faster-recycling L1/L3 opportunities_.
 
 Concrete example: April 22 2024, baseline picks KO's MACD Cross (vol_ratio=1.2, quality 62.4) and holds 44 days for +5.9%. With the new gate, KO doesn't trigger → scanner picks GOOGL's VWAP Support instead → exits in 3 days at +5.8% → 41 freed days to compound through other trades.
 
 Setup count shifted accordingly:
 
-| Setup            | Before (30 trades) | After (41 trades) |
-| ---------------- | ------------------ | ----------------- |
-| L1 Ride Uptrend  | ~15                | ~20               |
-| L3 VWAP Support  | ~8                 | ~17               |
-| L2 MACD Cross    | 3                  | 3                 |
-| L4 Pre-Golden X  | 1                  | 1                 |
+| Setup           | Before (30 trades) | After (41 trades) |
+| --------------- | ------------------ | ----------------- |
+| L1 Ride Uptrend | ~15                | ~20               |
+| L3 VWAP Support | ~8                 | ~17               |
+| L2 MACD Cross   | 3                  | 3                 |
+| L4 Pre-Golden X | 1                  | 1                 |
 
 ### Methodological lesson — `tune.py` can be directionally wrong
 
@@ -279,9 +281,9 @@ L3_SL_ATR        = 2.5   (changed from 2.0 — tuning session 3)
 L3_TP_ATR        = 2.5   (changed from 3.0 — tuning session 3)
 ```
 
-Sessions 1 & 2 fit one story: *volume conviction at the trigger gate matters as much as volume in the quality score* (continuation setups L1/L2).
+Sessions 1 & 2 fit one story: _volume conviction at the trigger gate matters as much as volume in the quality score_ (continuation setups L1/L2).
 
-Session 3 fits the **opposite** story for L3 (mean-reversion): *bounces are short-lived; grab them quickly with a 1:1 R:R rather than waiting for full extension*. L3 win rate jumped from 53% to 69% with this change.
+Session 3 fits the **opposite** story for L3 (mean-reversion): _bounces are short-lived; grab them quickly with a 1:1 R:R rather than waiting for full extension_. L3 win rate jumped from 53% to 69% with this change.
 
 ## Tuning session round 3 (2026-04-23) — L3 R:R tightened to 1:1
 
@@ -294,15 +296,15 @@ Ran a 324-variation L3-only grid (5 dimensions: VWAP distance, RSI floor, BB-mid
 
 ### Continuous backtest result (Cluster A picked)
 
-| Metric          | Pre-L3-tune       | + L3 1:1 R:R          | Δ          |
-| --------------- | ----------------- | --------------------- | ---------- |
-| Return          | +121.8%           | **+125.6%**           | **+3.8pp** |
-| Alpha           | +76.3pp           | **+80.0pp**           | **+3.7pp** |
-| End cap ($10k)  | $22,183           | **$22,556**           | +$373      |
-| Trades          | 41                | **44**                | +3         |
-| Win rate        | 46%               | **48%**               | +2pp       |
-| L3 win rate     | 53%               | **69%**               | +16pp      |
-| L3 avg P&L      | +1.1%/trade       | **+2.08%/trade**      | +0.98pp    |
+| Metric         | Pre-L3-tune | + L3 1:1 R:R     | Δ          |
+| -------------- | ----------- | ---------------- | ---------- |
+| Return         | +121.8%     | **+125.6%**      | **+3.8pp** |
+| Alpha          | +76.3pp     | **+80.0pp**      | **+3.7pp** |
+| End cap ($10k) | $22,183     | **$22,556**      | +$373      |
+| Trades         | 41          | **44**           | +3         |
+| Win rate       | 46%         | **48%**          | +2pp       |
+| L3 win rate    | 53%         | **69%**          | +16pp      |
+| L3 avg P&L     | +1.1%/trade | **+2.08%/trade** | +0.98pp    |
 
 ### Mechanism — opposite of L1
 
@@ -314,14 +316,14 @@ Tune.py predicted Y2 alpha would jump from -3.1pp to +33.2pp (+36pp Y2 improveme
 
 ### Setup-by-setup stats in current config (41 trades, 2y)
 
-| Setup                     | Trades | Wins | Flat (BE) | Losses | Win rate* | Avg P&L/trade |
-| ------------------------- | ------ | ---- | --------- | ------ | --------- | ------------- |
-| L1 Ride Uptrend           | 20     | 8    | 6         | 6      | 57%       | +2.4%         |
-| L3 VWAP Support           | 17     | 8    | 2         | 7      | 53%       | +1.1%         |
-| L2 MACD Cross             | 3      | 2    | 0         | 1      | 67%       | +6.0%         |
-| L4 Pre-Golden Cross       | 1      | 1*   | 0         | 0      | —         | +1.8%         |
+| Setup               | Trades | Wins | Flat (BE) | Losses | Win rate\* | Avg P&L/trade |
+| ------------------- | ------ | ---- | --------- | ------ | ---------- | ------------- |
+| L1 Ride Uptrend     | 20     | 8    | 6         | 6      | 57%        | +2.4%         |
+| L3 VWAP Support     | 17     | 8    | 2         | 7      | 53%        | +1.1%         |
+| L2 MACD Cross       | 3      | 2    | 0         | 1      | 67%        | +6.0%         |
+| L4 Pre-Golden Cross | 1      | 1\*  | 0         | 0      | —          | +1.8%         |
 
-*Win rate excludes BE-flat trades (trailing-to-breakeven saved a would-be loser). L4 exit was TIME-stop positive.
+\*Win rate excludes BE-flat trades (trailing-to-breakeven saved a would-be loser). L4 exit was TIME-stop positive.
 
 ### Priority for future tuning rounds
 
@@ -359,14 +361,16 @@ Alpha:   -24.9 pp    [LOST ✗]
 ```
 
 Damage concentrated in two clusters:
+
 1. **Feb 19-28 entries** (UNP/HD/NFLX): opened longs right as COVID broke, got stopped within days.
 2. **Oct-Nov chop** (AMZN/PFE/META/PLD): pre-election volatility ate trend setups.
 
-The algo *did* partially adapt (no entries Mar 9 → Apr 29, skipping the worst of the crash) but the Feb losses and the post-election whipsaws were already baked in.
+The algo _did_ partially adapt (no entries Mar 9 → Apr 29, skipping the worst of the crash) but the Feb losses and the post-election whipsaws were already baked in.
 
 ### The fix — a market-wide regime gate
 
 Added `long_regime_ok()` in `scripts/signals.py` (single SOT, consumed by the shared `simulate()` engine). LONG entries now require BOTH:
+
 - **SPY close > SPY 200-day MA** (broad trend intact)
 - **VIX < 30** (no crash regime)
 
@@ -374,11 +378,11 @@ Either condition fails → the scanner won't trigger a LONG that day. Applied un
 
 ### Results
 
-| Window                              | Before gate                | After gate                 | Δ alpha     |
-| ----------------------------------- | -------------------------- | -------------------------- | ----------- |
-| COVID (2020-02-19 → 2020-12)        | -12.9% / alpha **-24.9pp** | +42.4% / alpha **+30.4pp** | **+55.3pp** |
-| Bull run (2024-04-20 → 2026-04)     | +125.6% / **+80.0pp**      | +172.4% / **+126.9pp**     | **+46.9pp** |
-| GFC full cycle (2007-10-10 → 2009-12) | —                        | +30.2% / **+54.4pp**       | —           |
+| Window                                | Before gate                | After gate                 | Δ alpha     |
+| ------------------------------------- | -------------------------- | -------------------------- | ----------- |
+| COVID (2020-02-19 → 2020-12)          | -12.9% / alpha **-24.9pp** | +42.4% / alpha **+30.4pp** | **+55.3pp** |
+| Bull run (2024-04-20 → 2026-04)       | +125.6% / **+80.0pp**      | +172.4% / **+126.9pp**     | **+46.9pp** |
+| GFC full cycle (2007-10-10 → 2009-12) | —                          | +30.2% / **+54.4pp**       | —           |
 
 - COVID window: gate blocked 68 days of LONG scanning. Trades dropped 17→15, win rate 35%→60%, alpha -24.9pp → **+30.4pp** ([BEAT ✓]).
 - Bull window: gate blocked 45 days. Trades 44→42, win rate 48%→52%, alpha +80pp → **+126.9pp**.
@@ -386,11 +390,12 @@ Either condition fails → the scanner won't trigger a LONG that day. Applied un
 
 ### Mechanism
 
-The gate doesn't make individual setups better — it prevents entries during regimes where *all* longs are structurally disadvantaged (volatility spikes and broad downtrends produce more whipsaws than signals). Sitting in cash during flagged regimes has higher expected value than forcing trades.
+The gate doesn't make individual setups better — it prevents entries during regimes where _all_ longs are structurally disadvantaged (volatility spikes and broad downtrends produce more whipsaws than signals). Sitting in cash during flagged regimes has higher expected value than forcing trades.
 
 ### Verdict
 
 Combined with the L1/L2 volume tuning and L3 R:R tightening, the strategy now:
+
 - **Beats SPY by +126.9pp** over the 2024-2026 tune window (up from +80pp pre-gate).
 - **Beats SPY by +30.4pp** through the 2020 COVID crash (was losing -24.9pp pre-gate).
 - **Beats SPY by +54.4pp** through the 2007-2009 GFC full cycle — an event that predates every parameter in the config.
@@ -398,7 +403,7 @@ Combined with the L1/L2 volume tuning and L3 R:R tightening, the strategy now:
 
 The COVID and GFC results are strong evidence against in-sample fitting: neither 2020 nor 2008 was in the backtest until the gate was added, yet the same rules cleanly flipped two different disasters into outperformance. The edge is structural, not accidental.
 
-**The honest tradeoff:** the 2009 sub-window (post-March low recovery) shows the gate's cost — the strategy returned +32.7% while SPY rebounded +59.5% off the crash low. Regime gates can't distinguish "bottom is in" from "bear rally." You're paying a late-entry tax on V-recoveries in exchange for not catching the falling knife on the way down. Over the full 2007-2009 cycle the crash protection wins by 2× — but if you're evaluating this strategy over a window that starts *at* a crash low, it will look bad.
+**The honest tradeoff:** the 2009 sub-window (post-March low recovery) shows the gate's cost — the strategy returned +32.7% while SPY rebounded +59.5% off the crash low. Regime gates can't distinguish "bottom is in" from "bear rally." You're paying a late-entry tax on V-recoveries in exchange for not catching the falling knife on the way down. Over the full 2007-2009 cycle the crash protection wins by 2× — but if you're evaluating this strategy over a window that starts _at_ a crash low, it will look bad.
 
 ---
 
@@ -414,13 +419,13 @@ Ran a 4-variation `MAX_SLOTS ∈ {1, 2, 3, 4}` sweep on both windows (IS: 2024-0
 
 ### Result
 
-| Variation | IS alpha   | OOS alpha   | Sum         |
-| --------- | ---------- | ----------- | ----------- |
-| Baseline  | **+53.8pp** | **+33.2pp** | **+87.0pp** |
-| SLOTS=1   | +53.8pp    | +33.2pp     | +87.0pp     |
-| SLOTS=2   | +30.1pp    | +13.2pp     | +43.2pp     |
-| SLOTS=3   | —          | —           | failed +10pp floor |
-| SLOTS=4   | —          | —           | failed +10pp floor |
+| Variation | IS alpha    | OOS alpha   | Sum                |
+| --------- | ----------- | ----------- | ------------------ |
+| Baseline  | **+53.8pp** | **+33.2pp** | **+87.0pp**        |
+| SLOTS=1   | +53.8pp     | +33.2pp     | +87.0pp            |
+| SLOTS=2   | +30.1pp     | +13.2pp     | +43.2pp            |
+| SLOTS=3   | —           | —           | failed +10pp floor |
+| SLOTS=4   | —           | —           | failed +10pp floor |
 
 Each additional slot cut alpha roughly in half. SLOTS=3 and SLOTS=4 were so degraded they didn't clear the +10pp floor on at least one window.
 
@@ -438,17 +443,19 @@ If idle cash drag becomes a concern later, the right fix is a **portfolio overla
 
 ### Methodological note
 
-Round 4 also reinforces a pattern from earlier rounds: when an "obviously good" idea (more diversification) underperforms, trust the deterministic backtest. Diversification is good *when components are uncorrelated and equal-EV* — neither holds here.
+Round 4 also reinforces a pattern from earlier rounds: when an "obviously good" idea (more diversification) underperforms, trust the deterministic backtest. Diversification is good _when components are uncorrelated and equal-EV_ — neither holds here.
 
 ---
 
 ## Next steps
 
+https://claude.ai/chat/34ec3fcd-9cae-4713-bca8-1dea70df4b89
+
 Do these in order. Each one is a single, self-contained change. After each, re-run `scripts/backtest.py` on the 2024-2026 window. If alpha drops, revert and move on.
 
 ### Do next (in this order)
 
-**1. Re-run old backtests with the regime gate.** The 2022-2024 number in the README (+16.2pp) is from *before* the regime gate was added. Re-run it. Then run 2015 and 2018 too — both are different regimes (chop, vol shock) we haven't seen. No code change needed; just edit `START_DATE` / `END_DATE` at the top of `backtest.py`.
+**1. Re-run old backtests with the regime gate.** The 2022-2024 number in the README (+16.2pp) is from _before_ the regime gate was added. Re-run it. Then run 2015 and 2018 too — both are different regimes (chop, vol shock) we haven't seen. No code change needed; just edit `START_DATE` / `END_DATE` at the top of `backtest.py`.
 
 **2. Skip trades near earnings.** Before entering any trade, check if the company reports earnings in the next 7-10 trading days. If yes, skip. Use `yfinance.Ticker(t).get_earnings_dates()`. Add the check inside the candidate loop in `simulate()` (backtest.py) and in the live scanner (`sma200_filter.py`). One filter, applied in both places.
 
@@ -462,14 +469,14 @@ Do these in order. Each one is a single, self-contained change. After each, re-r
 
 ### Don't bother — already settled
 
-| Idea | Why skip |
-| --- | --- |
-| More walk-forward / OOS validation | `tune.py` already does IS/OOS every round. COVID, 2022-24, and GFC are all OOS-tested. |
-| Per-setup P&L breakdown | Done. See round-3 table. |
-| Multi-position sizing (2-8 concurrent slots) | **Tested in round 4. Cut alpha in half.** Don't reopen. |
-| Three-mode regime-scaled exposure | Doesn't apply at SLOTS=1; binary gate already covers the off-leg. |
-| MFI, breadth indicator, 52-week-high gate | Duplicate work — volume, breadth, and SMA200 already do this. |
-| New setups (breakout, post-earnings drift) | Premature until #2 lands and L4 (n=1) is fixed. |
+| Idea                                         | Why skip                                                                               |
+| -------------------------------------------- | -------------------------------------------------------------------------------------- |
+| More walk-forward / OOS validation           | `tune.py` already does IS/OOS every round. COVID, 2022-24, and GFC are all OOS-tested. |
+| Per-setup P&L breakdown                      | Done. See round-3 table.                                                               |
+| Multi-position sizing (2-8 concurrent slots) | **Tested in round 4. Cut alpha in half.** Don't reopen.                                |
+| Three-mode regime-scaled exposure            | Doesn't apply at SLOTS=1; binary gate already covers the off-leg.                      |
+| MFI, breadth indicator, 52-week-high gate    | Duplicate work — volume, breadth, and SMA200 already do this.                          |
+| New setups (breakout, post-earnings drift)   | Premature until #2 lands and L4 (n=1) is fixed.                                        |
 
 ### Rule for each step
 
