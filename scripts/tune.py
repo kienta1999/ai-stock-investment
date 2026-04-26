@@ -38,7 +38,7 @@ import yfinance as yf
 
 from universe import load_universe
 import signals as sg
-from signals import build_regime_series, BENCHMARK
+from signals import BENCHMARK
 from backtest import simulate, CAPITAL_INIT
 
 IN_START   = date(2024, 4, 20)
@@ -101,12 +101,8 @@ def spy_return(raw, bt_dates):
     return (spy_w.iloc[-1] / spy_w.iloc[0] - 1) * 100
 
 
-def run_one(raw, tickers, all_dates, bt_dates, bench_ret, regime):
-    spy_close, spy_ma, vix_close = regime
-    end_cap, trades, _ = simulate(
-        raw, tickers, all_dates, bt_dates,
-        spy_close=spy_close, spy_ma=spy_ma, vix_close=vix_close,
-    )
+def run_one(raw, tickers, all_dates, bt_dates, bench_ret):
+    end_cap, trades, _ = simulate(raw, tickers, all_dates, bt_dates)
     n = len(trades)
     wins = sum(1 for t in trades if t["pnl_pct"] > 0)
     ret = (end_cap / CAPITAL_INIT - 1) * 100
@@ -162,12 +158,6 @@ def main():
     print(f"\nIn-sample  ({IN_START} → {IN_END}):    {len(in_dates)} days, SPY {in_bench:+.1f}%")
     print(f"Out-sample ({OUT_START} → {OUT_END}):  {len(out_dates)} days, SPY {out_bench:+.1f}%")
 
-    # Regime series — shared across all variations; pass-through to simulate()
-    regime = build_regime_series(raw)
-    if regime[0] is None:
-        print("WARN: regime data unavailable in cached OHLCV — run with --refresh "
-              "to re-download including ^VIX. Gate disabled for this sweep.")
-
     baseline = snapshot_baseline()
     variations = build_variations()
     n = len(variations)
@@ -180,8 +170,8 @@ def main():
     for i, (name, overrides) in enumerate(variations):
         apply_overrides(baseline)
         apply_overrides(overrides)
-        in_res  = run_one(raw, tickers, all_dates, in_dates, in_bench, regime)
-        out_res = run_one(raw, tickers, all_dates, out_dates, out_bench, regime)
+        in_res  = run_one(raw, tickers, all_dates, in_dates, in_bench)
+        out_res = run_one(raw, tickers, all_dates, out_dates, out_bench)
         results.append({"name": name, "overrides": overrides,
                         "in": in_res, "out": out_res})
         print(".", end="", flush=True)

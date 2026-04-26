@@ -20,7 +20,7 @@ import pandas as pd
 import yfinance as yf
 from universe import load_universe
 import signals as sg
-from signals import build_regime_series, SPY_MA_PERIOD, VIX_MAX, BENCHMARK
+from signals import SPY_MA_PERIOD, VIX_MAX, BENCHMARK
 from sma200_filter import scan
 
 START_DATE  = date(2024, 4, 20)
@@ -132,12 +132,11 @@ def simulate_trade(ticker: str, direction: str,
 def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, *,
              capital_init: float = CAPITAL_INIT,
              max_slots: int = None,
-             spy_close=None, spy_ma=None, vix_close=None,
              verbose: bool = False) -> tuple:
     """Run the scan-pick-enter-exit loop over bt_dates with up to N concurrent slots.
     Each slot starts with capital_init/N and compounds independently. Returns
-    (total_capital, trades, regime_blocked_days). If regime series are provided,
-    applies the LONG entry gate from signals.long_regime_ok.
+    (total_capital, trades, regime_blocked_days). The LONG entry gate
+    (SPY > 200DMA AND VIX < VIX_MAX) is applied inside scan().
 
     max_slots=None reads sg.MAX_SLOTS at call time (so tune.py overrides apply)."""
     n_slots = max_slots if max_slots is not None else sg.MAX_SLOTS
@@ -175,9 +174,7 @@ def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, 
 
         # ── 2. Scan once, gather all candidates ──────────────────────────────
         today_ts = pd.Timestamp(today)
-        result = scan(raw=raw, as_of=today_ts, tickers=tickers,
-                      spy_close=spy_close, spy_ma=spy_ma, vix_close=vix_close,
-                      verbose=False)
+        result = scan(raw=raw, as_of=today_ts, tickers=tickers, verbose=False)
         if result is None:
             continue
 
@@ -273,14 +270,8 @@ def run():
     bt_dates  = [d for d in all_dates if START_DATE <= d <= END_DATE]
     print(f"Backtest: {START_DATE} → {END_DATE}  ({len(bt_dates)} trading days)\n")
 
-    spy_close, spy_ma, vix_close = build_regime_series(raw)
-    if spy_close is None:
-        print("WARN: regime data unavailable; gate disabled")
-
     capital, trades, regime_blocked_days = simulate(
-        raw, tickers, all_dates, bt_dates,
-        spy_close=spy_close, spy_ma=spy_ma, vix_close=vix_close,
-        verbose=True,
+        raw, tickers, all_dates, bt_dates, verbose=True,
     )
 
     # ── Summary ───────────────────────────────────────────────────────────────

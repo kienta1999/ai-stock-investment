@@ -36,29 +36,21 @@ except ImportError:
 
 
 def scan(raw=None, as_of=None, tickers: list = None,
-         spy_close=None, spy_ma=None, vix_close=None,
-         force_refresh: bool = False, verbose: bool = True,
-         carry_indicators: bool = False) -> dict | None:
+         force_refresh: bool = False, verbose: bool = True) -> dict | None:
     """
     Single source of truth for the per-day scan. Used by:
-      - the live CLI (run() below) — no args; downloads fresh data
-      - backtest.simulate() — passes raw, as_of, precomputed regime series
+      - the live CLI (run() below)  — no args; downloads fresh data
+      - paper_trade.py              — no args; downloads fresh data
+      - backtest.simulate()         — passes raw + as_of (per backtest day)
 
     Args:
-      raw:                  pd.DataFrame from yf.download (multi-ticker, columns =
-                            (field, ticker)). If None, downloads 1y of the
-                            top-100 universe + SPY + ^VIX.
-      as_of:                pd.Timestamp to scan as-of. If None, uses raw.index[-1].
-                            Indicators are computed using bars up to this timestamp.
-      tickers:              universe tickers. Required if `raw` is provided; loaded
-                            from cache otherwise.
-      spy_close,
-      spy_ma,
-      vix_close:            precomputed regime series (build_regime_series). If
-                            None, computed from raw — caller can pass them once
-                            outside a date loop to avoid recomputing.
-      carry_indicators:     if True, each pick dict carries the full `ind` (kept
-                            internal — backtest needs no extra fields right now).
+      raw:      pd.DataFrame from yf.download (multi-ticker, columns =
+                (field, ticker)). If None, downloads 1y of the top-100
+                universe + SPY + ^VIX.
+      as_of:    pd.Timestamp to scan as-of. If None, uses raw.index[-1].
+                Indicators are computed using bars up to this timestamp.
+      tickers:  universe tickers. Optional when raw provided (derived from
+                the column index); loaded from cache otherwise.
 
     Returns None on data failure. Otherwise:
       {scan_date, gate_open, gate_detail, spy_price, spy_ma, vix,
@@ -77,7 +69,6 @@ def scan(raw=None, as_of=None, tickers: list = None,
         if raw.empty:
             return None
     elif tickers is None:
-        # Caller passed raw without tickers — derive from the column index
         try:
             tickers = [t for t in raw["Close"].columns
                        if t not in (BENCHMARK, "^VIX")]
@@ -87,8 +78,7 @@ def scan(raw=None, as_of=None, tickers: list = None,
     if as_of is None:
         as_of = raw.index[-1]
 
-    if spy_close is None or spy_ma is None or vix_close is None:
-        spy_close, spy_ma, vix_close = build_regime_series(raw)
+    spy_close, spy_ma, vix_close = build_regime_series(raw)
 
     long_rows, short_rows, triggered = [], [], []
     rs_set = (rs_eligible(raw, tickers, as_of)
@@ -156,7 +146,7 @@ def scan(raw=None, as_of=None, tickers: list = None,
                 continue
             if t["quality"] < MIN_QUALITY_SCORE:
                 continue
-            pick = {
+            picks.append({
                 "ticker":     t["Ticker"],
                 "setup":      t["setup"],
                 "direction":  t["direction"],
@@ -168,10 +158,7 @@ def scan(raw=None, as_of=None, tickers: list = None,
                 "vol_ratio":  round(t["vol_ratio"], 2),
                 "atr_pct":    round(t["atr_pct"], 2),
                 "rr":         t["rr"],
-            }
-            if carry_indicators:
-                pick["_indicators"] = t
-            picks.append(pick)
+            })
 
     return {
         "scan_date":        pd.Timestamp(as_of).date().isoformat(),

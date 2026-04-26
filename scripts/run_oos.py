@@ -27,7 +27,7 @@ import yfinance as yf
 
 from universe import load_universe
 import signals as sg
-from signals import build_regime_series, BENCHMARK
+from signals import BENCHMARK
 from backtest import simulate, CAPITAL_INIT
 
 # Baseline alpha = current shipped config (RS filter v1, dual 63/126 ∩ top 40%).
@@ -77,11 +77,7 @@ def run_window(name, start, end, baseline_alpha, refresh):
     if not bt_dates:
         return None
 
-    spy_close, spy_ma, vix_close = build_regime_series(raw)
-    end_cap, trades, blocked = simulate(
-        raw, tickers, all_dates, bt_dates,
-        spy_close=spy_close, spy_ma=spy_ma, vix_close=vix_close,
-    )
+    end_cap, trades, blocked = simulate(raw, tickers, all_dates, bt_dates)
 
     n     = len(trades)
     wins  = sum(1 for t in trades if t["pnl_pct"] > 0)
