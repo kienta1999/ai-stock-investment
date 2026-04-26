@@ -299,13 +299,15 @@ If you want to change the strategy, you change a constant or a function here. No
 
 `python3 scripts/sma200_filter.py` — no args. `--refresh` re-pulls the universe from Wikipedia.
 
+**`scan()` is the single SOT for "what does the algo see on day X"** — consumed by the live CLI, by `paper_trade.py`, and by `backtest.simulate()` (per-day). Any change to pre-setup filters, regime gating, or candidate ranking only needs to land here.
+
 Two entry points:
-- **`scan(force_refresh=False, verbose=True) -> dict`** — programmatic API. Returns `{scan_date, gate_open, gate_detail, spy_price, spy_ma, vix, breadth_long, breadth_short, breadth_total, rs_eligible, long_rows, short_rows, triggered, picks, raw, tickers}`. `picks` is the actionable LONG candidate list (regime-allowed, ≥`MIN_QUALITY_SCORE`, sorted by quality desc), each entry containing `ticker, setup, direction, quality, entry, sl, tp, rsi, vol_ratio, atr_pct, rr`. `raw` is the full OHLCV frame so callers (`paper_trade.py`) can avoid re-downloading.
+- **`scan(raw=None, as_of=None, tickers=None, spy_close=None, spy_ma=None, vix_close=None, force_refresh=False, verbose=True) -> dict`** — programmatic API. With no args, downloads 1y of the universe + SPY + ^VIX and scans the latest bar. Pass `raw + as_of + precomputed regime series` to scan a historical timestamp without re-downloading (this is what `backtest.simulate` does on every backtest day). Returns `{scan_date, gate_open, gate_detail, spy_price, spy_ma, vix, breadth_long, breadth_short, breadth_total, rs_eligible, long_rows, short_rows, triggered, picks, raw, tickers}`. `picks` is the actionable LONG candidate list (regime-allowed, ≥`MIN_QUALITY_SCORE`, sorted by quality desc), each entry containing `ticker, setup, direction, quality, entry, sl, tp, rsi, vol_ratio, atr_pct, rr`.
 - **`run(force_refresh=False) -> dict`** — CLI wrapper: calls `scan()`, prints the human-readable report, returns the dict.
 
 ### `scripts/backtest.py`
 **The reference simulator and CLI for a single date range.** Two pieces:
-1. `simulate(raw, tickers, all_dates, bt_dates, ...)` — the core engine. Loops day by day: scan EOD, enter next-day open, monitor TP/SL/time-stop with daily highs/lows, track trailing-to-breakeven, score candidates, pick highest-quality, fill free slots. Used by `tune.py` and `run_oos.py` too.
+1. `simulate(raw, tickers, all_dates, bt_dates, ...)` — the core engine. Loops day by day: exits any slot whose trade ended, then delegates the per-day candidate scan to `sma200_filter.scan(raw=raw, as_of=today_ts, ...)` — so RS filter, ATR cap, indicator math, setup detection, regime gate, and quality threshold all live in `scan()` and never drift between live and backtest. Engine itself owns the slot-management half: dedup against held tickers, fill free slots from the picks, monitor TP/SL/time-stop with daily highs/lows, track trailing-to-breakeven. Used by `tune.py` and `run_oos.py` too.
 2. CLI `run()` — defaults to 2024-04-20 → 2026-04-20, downloads OHLCV fresh, runs `simulate()`, prints trade log + benchmark comparison + alpha.
 
 Editing `START_DATE`/`END_DATE` at the top runs the same engine on a different window. For multi-window evaluation use `run_oos.py` instead.
