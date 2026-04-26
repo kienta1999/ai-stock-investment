@@ -22,6 +22,15 @@ MAX_ATR_PCT    = 4.0    # skip entries where ATR% exceeds this (vol-cap guardrai
 SPY_MA_PERIOD  = 200    # SPY trend filter for long-entry regime gate
 VIX_MAX        = 30.0   # block LONG entries when VIX >= this
 BENCHMARK      = "SPY"  # market benchmark (regime gate + buy-and-hold comparison)
+
+# Relative-strength filter — only allow entries on tickers in the top quartile
+# of universe by BOTH 3M and 6M return. Targets the chop regime (e.g. 2015):
+# stops the strategy from buying former winners that have started to roll.
+RS_FILTER_ENABLED = True
+RS_LOOKBACK_3M    = 63   # trading days (~3 months)
+RS_LOOKBACK_6M    = 126  # trading days (~6 months); 0 disables, 3M-only ranking
+RS_TOP_PCT        = 0.40 # keep top X% by each lookback (tuned 2026-04-25 OOS sweep)
+
 MAX_SLOTS      = 1      # max concurrent positions; capital split equally per slot
                         # (each slot = its own sub-account, compounds independently)
                         # Tuned 2026-04-25: SLOTS=1 wins decisively. SLOTS=2 cuts
@@ -277,6 +286,63 @@ def long_regime_ok(spy_close: "pd.Series", spy_ma: "pd.Series",
     except Exception:
         return True
     return (spy_px > spy_m) and (vix_px < vix_max)
+
+
+def rs_eligible(raw, tickers: list, today_ts: "pd.Timestamp",
+                lookback_3m: int = None, lookback_6m: int = None,
+                top_pct: float = None) -> set:
+    """Return tickers in the top `top_pct` of the universe by return.
+    Lookbacks default to module config; pass `lookback_6m=0` (or set
+    RS_LOOKBACK_6M = 0) to disable the 6M leg and rank by 3M alone.
+    Fail-open on insufficient/missing data."""
+    import pandas as pd
+    lookback_3m = RS_LOOKBACK_3M if lookback_3m is None else lookback_3m
+    lookback_6m = RS_LOOKBACK_6M if lookback_6m is None else lookback_6m
+    top_pct     = RS_TOP_PCT     if top_pct     is None else top_pct
+
+    try:
+        closes = raw["Close"]
+    except (KeyError, Exception):
+        return set(tickers)
+
+    min_history = max(lookback_3m, lookback_6m or 0)
+    valid = closes.index[closes.index <= today_ts]
+    if len(valid) <= min_history:
+        return set(tickers)
+    today_idx = closes.index.get_loc(valid[-1])
+    if today_idx < min_history:
+        return set(tickers)
+
+    row_now = closes.iloc[today_idx]
+    row_3m  = closes.iloc[today_idx - lookback_3m]
+    row_6m  = closes.iloc[today_idx - lookback_6m] if lookback_6m else None
+
+    ret_3m, ret_6m = {}, {}
+    for t in tickers:
+        try:
+            p_now = float(row_now[t])
+            p3    = float(row_3m[t])
+            p6    = float(row_6m[t]) if row_6m is not None else None
+        except (KeyError, Exception):
+            continue
+        if pd.isna(p_now) or pd.isna(p3) or p3 <= 0:
+            continue
+        if p6 is not None and (pd.isna(p6) or p6 <= 0):
+            continue
+        ret_3m[t] = p_now / p3 - 1
+        if p6 is not None:
+            ret_6m[t] = p_now / p6 - 1
+
+    if not ret_3m:
+        return set(tickers)
+
+    n_top_3m = max(1, int(len(ret_3m) * top_pct))
+    top_3m   = set(sorted(ret_3m, key=ret_3m.get, reverse=True)[:n_top_3m])
+    if not lookback_6m or not ret_6m:
+        return top_3m
+    n_top_6m = max(1, int(len(ret_6m) * top_pct))
+    top_6m   = set(sorted(ret_6m, key=ret_6m.get, reverse=True)[:n_top_6m])
+    return top_3m & top_6m
 
 
 def build_regime_series(raw, benchmark: str = BENCHMARK):

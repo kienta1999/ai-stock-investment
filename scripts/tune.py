@@ -91,7 +91,7 @@ def apply_overrides(overrides: dict):
 
 def snapshot_baseline() -> dict:
     return {k: getattr(sg, k) for k in dir(sg)
-            if (k.startswith(("Q_", "L1_", "L2_", "L3_", "L4_"))
+            if (k.startswith(("Q_", "L1_", "L2_", "L3_", "L4_", "RS_"))
                 or k in ("MIN_QUALITY_SCORE", "MAX_SLOTS"))}
 
 

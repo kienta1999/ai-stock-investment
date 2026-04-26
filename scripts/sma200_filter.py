@@ -19,9 +19,10 @@ try:
     import yfinance as yf
     from universe import load_universe
     from indicators import compute, ticker_frame
+    import signals as sg
     from signals import (score, quality, market_regime, long_regime_ok,
-                         build_regime_series, MAX_ATR_PCT, VIX_MAX,
-                         SPY_MA_PERIOD, BENCHMARK)
+                         build_regime_series, rs_eligible,
+                         MAX_ATR_PCT, VIX_MAX, SPY_MA_PERIOD, BENCHMARK)
 except ImportError:
     print("ERROR: Missing dependencies. Run:")
     print("  uv pip install yfinance pandas lxml requests --python .venv/bin/python3")
@@ -45,6 +46,9 @@ def run(force_refresh: bool = False) -> None:
 
     # ── Process each ticker ───────────────────────────────────────────────────
     long_rows, short_rows, triggered = [], [], []
+
+    rs_set = (rs_eligible(raw, tickers, raw.index[-1])
+              if sg.RS_FILTER_ENABLED else None)
 
     for ticker in tickers:
         df = ticker_frame(raw, ticker)
@@ -77,6 +81,8 @@ def run(force_refresh: bool = False) -> None:
             })
 
         if ind.get("atr_pct", 0) > MAX_ATR_PCT:
+            continue
+        if rs_set is not None and ticker not in rs_set:
             continue
         for s in score(ind):
             row = {"Ticker": ticker, **ind, **s}
@@ -112,6 +118,9 @@ def run(force_refresh: bool = False) -> None:
     status = "OPEN — LONG entries allowed" if gate_open else "BLOCKED — LONG entries suppressed"
     print(f"  REGIME GATE    | {status}")
     print(f"                 | {gate_detail}")
+    if rs_set is not None:
+        print(f"  RS FILTER      | top {int(sg.RS_TOP_PCT*100)}% by 3M ∩ 6M return — "
+              f"{len(rs_set)} eligible of {len(tickers)}")
     print(f"{'='*66}")
 
     # ── Long universe (price > SMA200) ────────────────────────────────────────

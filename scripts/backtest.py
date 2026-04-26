@@ -22,7 +22,7 @@ from universe import load_universe
 from indicators import compute, ticker_frame
 import signals as sg
 from signals import (score as score_setups, quality, MIN_QUALITY_SCORE,
-                     long_regime_ok, build_regime_series,
+                     long_regime_ok, build_regime_series, rs_eligible,
                      MAX_ATR_PCT, SPY_MA_PERIOD, VIX_MAX, BENCHMARK)
 
 START_DATE  = date(2024, 4, 20)
@@ -181,8 +181,12 @@ def simulate(raw: pd.DataFrame, tickers: list, all_dates: list, bt_dates: list, 
         long_allowed = (long_regime_ok(spy_close, spy_ma, vix_close, today_ts)
                         if regime_ready else True)
 
+        rs_set = rs_eligible(raw, tickers, today_ts) if sg.RS_FILTER_ENABLED else None
+
         candidates = []
         for ticker in tickers:
+            if rs_set is not None and ticker not in rs_set:
+                continue
             df = ticker_frame(raw, ticker, up_to=today_ts)
             if df is None or len(df) < 200:
                 continue
