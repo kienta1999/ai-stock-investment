@@ -1,0 +1,2 @@
+run_date,scan_date,action,slot,ticker,setup,quality,price,shares,sl,tp,be_trigger,pnl_pct,pnl_usd,slot_cash_after,portfolio_value,days_held,note
+2026-04-29,2026-04-29,BUY,0,SBUX,Ride Uptrend,62.0,106.46,93.931993,101.02,117.34,111.9,,,0.0,,0,"deployed $10,000.00; RSI 70.7, vol 1.77x, ATR 2.55%"

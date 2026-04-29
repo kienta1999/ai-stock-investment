@@ -5,9 +5,25 @@
   "slots": [
     {
       "idx": 0,
-      "cash": 10000.0,
-      "position": null
+      "cash": 0.0,
+      "position": {
+        "ticker": "SBUX",
+        "direction": "LONG",
+        "setup": "Ride Uptrend",
+        "quality": 62.0,
+        "entry_date": "2026-04-29",
+        "scan_date": "2026-04-29",
+        "entry": 106.46,
+        "shares": 93.931993,
+        "sl": 101.02,
+        "original_sl": 101.02,
+        "tp": 117.34,
+        "be_trigger": 111.9,
+        "be_moved": false,
+        "days_held": 0,
+        "last_processed_date": "2026-04-29"
+      }
     }
   ],
-  "last_run_date": "2026-04-28"
+  "last_run_date": "2026-04-29"
 }
